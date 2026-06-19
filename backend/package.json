@@ -1,0 +1,20 @@
+{
+  "name": "job-alert-backend",
+  "version": "1.0.0",
+  "description": "Job alert cron engine for Upwork RSS and LinkedIn scraping with FCM notifications",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "firebase-admin": "^12.7.0",
+    "playwright": "^1.49.1",
+    "rss-parser": "^3.13.0"
+  }
+}

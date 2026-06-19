@@ -1,0 +1,5 @@
+# Local secrets — never commit
+.env
+service-account.json
+service-account*.json
+*.log

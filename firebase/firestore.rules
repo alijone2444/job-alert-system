@@ -1,0 +1,23 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Device tokens — mobile app can read/write its own doc
+    match /users/{deviceId} {
+      allow read, write: if true;
+    }
+
+    // Job history — mobile app reads; only Admin SDK (backend) writes
+    match /jobs/{jobId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Backend cron run report — mobile reads; only Admin SDK writes
+    match /cron_status/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+  }
+}

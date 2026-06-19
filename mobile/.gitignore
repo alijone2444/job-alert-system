@@ -38,7 +38,7 @@ npm-debug.log
 yarn-error.log
 
 # Firebase config (download from Firebase Console — do not commit)
-google-services.json
+#google-services.json
 GoogleService-Info.plist
 android/app/google-services.json
 ios/JobAlert/GoogleService-Info.plist

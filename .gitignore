@@ -1,5 +1,21 @@
-.env
+# Local environment variables and credentials
+#.env
+#*.env
+#backend/.env
+#mobile/.env
+#service-account*.json
+#backend/service-account*.json
+
+# Dependencies (Har folder ki node_modules)
+**/node_modules/
 node_modules/
-.DS_Store
+
+# Logs and OS files
 *.log
-service-account*.json
+.DS_Store
+Thumbs.db
+
+# Android Specific (Mobile folder ke andar)
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/local.properties

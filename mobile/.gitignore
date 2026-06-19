@@ -39,7 +39,7 @@ yarn-error.log
 
 # Firebase config (download from Firebase Console — do not commit)
 #google-services.json
-GoogleService-Info.plist
+#GoogleService-Info.plist
 android/app/google-services.json
 ios/JobAlert/GoogleService-Info.plist
 

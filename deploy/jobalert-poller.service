@@ -1,0 +1,20 @@
+[Unit]
+Description=Job Alert Poller (LinkedIn -> Firestore -> FCM)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/job-alert-system/backend
+# Poll interval in seconds (LinkedIn check frequency)
+Environment=POLL_INTERVAL_SECONDS=150
+ExecStart=/usr/bin/node src/poll.js
+Restart=always
+RestartSec=15
+# Keep logs in journald
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

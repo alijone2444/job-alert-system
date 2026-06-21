@@ -1,6 +1,23 @@
 # Setup status & next steps
 
-_Last updated: 2026-06-21_
+_Last updated: 2026-06-22 — DEPLOYED & WORKING_
+
+## ✅ Live deployment (current state)
+- **Firebase key:** old one was auto-revoked by Google (it was in the public
+  repo). New key is now: a **local file** `backend/service-account.json` (dev) +
+  a **GitHub Secret** `FIREBASE_SERVICE_ACCOUNT` (CI). It is **never committed**
+  (gitignored), so it won't be revoked again.
+- **Cloud (GitHub Actions):** runs every ~5 min from `.github/workflows/cron.yml`.
+  Verified run #25 = success, writes to Firestore OK. Manually trigger anytime:
+  Actions → Job Alert Cron → Run workflow.
+- **Local poller:** `cd backend && npm run poll` (every ~150s). Uses your home
+  IP, so it fetches LinkedIn more reliably than the cloud (LinkedIn rate-limits
+  datacenter IPs, so the cloud run sometimes returns 0 jobs — that's expected;
+  the poller is the workhorse). Runs only while the machine is on.
+- **Mobile:** standalone signed release APK installed on the phone (no PC needed).
+
+> To get the key one-line for the GitHub Secret again:
+> `(Get-Content backend/service-account.json -Raw | ConvertFrom-Json | ConvertTo-Json -Compress) | Set-Clipboard`
 
 ## Deployment guide
 

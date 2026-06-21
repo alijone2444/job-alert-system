@@ -22,15 +22,18 @@ function optionalEnv(name, fallback = '') {
 }
 
 function loadServiceAccount() {
+  // Prefer a local file if it actually exists (local dev). On CI the file is
+  // not committed (a Firebase key in a public repo gets auto-revoked by Google),
+  // so fall back to the FIREBASE_SERVICE_ACCOUNT env / GitHub Secret.
   const filePath = optionalEnv('FIREBASE_SERVICE_ACCOUNT_PATH');
 
   if (filePath) {
     const absolutePath = resolve(process.cwd(), filePath);
-    if (!existsSync(absolutePath)) {
-      throw new Error(`Service account file not found: ${absolutePath}`);
+    if (existsSync(absolutePath)) {
+      const raw = readFileSync(absolutePath, 'utf8');
+      return JSON.parse(raw);
     }
-    const raw = readFileSync(absolutePath, 'utf8');
-    return JSON.parse(raw);
+    // file missing -> fall through to the env-based credential
   }
 
   const raw = requireEnv('FIREBASE_SERVICE_ACCOUNT');

@@ -38,6 +38,9 @@ jobs:
 
       - name: Run job alert engine
         working-directory: backend
-        # Config + credentials come from the committed backend/.env and
-        # backend/service-account.json (no GitHub Secrets needed).
+        # Non-secret config (LinkedIn URL, keyword filter, etc.) comes from the
+        # committed backend/.env. Only the Firebase key is a GitHub Secret,
+        # because committing it to a public repo gets it auto-revoked by Google.
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: npm start

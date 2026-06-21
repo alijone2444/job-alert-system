@@ -1,10 +1,8 @@
-# NOTE: credentials are intentionally committed (user's choice) so the cron
-# "just works" without GitHub Secrets. Repo should ideally be private.
-# .env
-# *.env
-# backend/.env
-# service-account*.json
-# backend/service-account*.json
+# .env is committed (no live secret in it). The Firebase service-account key is
+# NOT committed — a key in a public repo gets auto-revoked by Google. It lives in
+# the GitHub Secret FIREBASE_SERVICE_ACCOUNT (CI) and a local file (dev).
+service-account*.json
+backend/service-account*.json
 
 # Android release signing key (back this up separately, never commit)
 mobile/android/app/jobalert-release.keystore

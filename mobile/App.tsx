@@ -60,20 +60,11 @@ export default function App() {
 
     init();
 
+    // New jobs arrive silently in the foreground (no interrupting popup) — the
+    // list updates in real-time, and tray notifications still show when the app
+    // is in the background or closed.
     const foregroundUnsub = onForegroundMessage((message) => {
-      const title = message.notification?.title ?? 'New Job Alert';
-      const body = message.notification?.body ?? '';
-      const link = getMessageLink(message.data);
-
-      Alert.alert(title, body, [
-        { text: 'Dismiss', style: 'cancel' },
-        {
-          text: 'View Job',
-          onPress: () => {
-            if (link) Linking.openURL(link);
-          },
-        },
-      ]);
+      logger.info('App', `New job (foreground, no popup): ${message.notification?.title ?? ''}`);
     });
 
     const openedUnsub = onNotificationOpened((message) => {

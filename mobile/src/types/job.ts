@@ -7,6 +7,7 @@ export type JobAlert = {
   description?: string;
   company?: string;
   location?: string;
+  country?: string;
   publishedAt?: string;
   notifiedAt?: string;
   createdAt?: { seconds: number; nanoseconds: number } | string;

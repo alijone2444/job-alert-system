@@ -19,5 +19,10 @@ service cloud.firestore {
       allow read: if true;
       allow write: if false;
     }
+
+    // App-controlled filter settings (which country to fetch) — app reads/writes
+    match /settings/{docId} {
+      allow read, write: if true;
+    }
   }
 }

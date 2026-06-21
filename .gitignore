@@ -1,10 +1,13 @@
-# Local environment variables and credentials
-#.env
-#*.env
-#backend/.env
-#mobile/.env
-#service-account*.json
-#backend/service-account*.json
+# NOTE: credentials are intentionally committed (user's choice) so the cron
+# "just works" without GitHub Secrets. Repo should ideally be private.
+# .env
+# *.env
+# backend/.env
+# service-account*.json
+# backend/service-account*.json
+
+# Android release signing key (back this up separately, never commit)
+mobile/android/app/jobalert-release.keystore
 
 # Dependencies (Har folder ki node_modules)
 **/node_modules/
@@ -19,3 +22,4 @@ Thumbs.db
 mobile/android/.gradle/
 mobile/android/app/build/
 mobile/android/local.properties
+job-alert-system-*-firebase-adminsdk-*.json

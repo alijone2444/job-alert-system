@@ -1,4 +1,5 @@
 import Parser from 'rss-parser';
+import { compileKeywordQuery, matchesKeyword } from '../services/keywordFilter.js';
 
 const parser = new Parser({
   customFields: {
@@ -39,7 +40,7 @@ function normalizeUpworkItem(item) {
 /**
  * Fetch jobs from the Upwork RSS feed.
  * @param {string} rssUrl
- * @param {string} keywordFilter - optional lowercase keyword filter
+ * @param {string} keywordFilter - optional boolean keyword query (AND/OR/NOT)
  * @returns {Promise<Array>}
  */
 export async function fetchUpworkJobs(rssUrl, keywordFilter = '') {
@@ -60,14 +61,11 @@ export async function fetchUpworkJobs(rssUrl, keywordFilter = '') {
     return [];
   }
 
+  const compiledFilter = compileKeywordQuery(keywordFilter);
   const jobs = feed.items
     .map(normalizeUpworkItem)
     .filter(Boolean)
-    .filter((job) => {
-      if (!keywordFilter) return true;
-      const haystack = `${job.title} ${job.description}`.toLowerCase();
-      return haystack.includes(keywordFilter);
-    });
+    .filter((job) => matchesKeyword(`${job.title} ${job.description}`, compiledFilter));
 
   console.log(`[Upwork] Parsed ${jobs.length} job(s) from RSS feed`);
   return jobs;

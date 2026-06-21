@@ -6,7 +6,7 @@ import { AlertsScreen } from '../screens/AlertsScreen';
 import { SystemStatusScreen } from '../screens/SystemStatusScreen';
 
 export type RootTabParamList = {
-  Jobs: undefined;
+  LinkedIn: undefined;
   Status: undefined;
 };
 
@@ -17,6 +17,9 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
     <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{label}</Text>
   );
 }
+
+// Platform-scoped wrapper. (Upwork tab is disabled for now — it's parked.)
+const LinkedInScreen = () => <AlertsScreen platform="LinkedIn" />;
 
 export function AppNavigator() {
   return (
@@ -39,8 +42,8 @@ export function AppNavigator() {
         }}
       >
         <Tab.Screen
-          name="Jobs"
-          component={AlertsScreen}
+          name="LinkedIn"
+          component={LinkedInScreen}
           options={{
             tabBarLabel: 'Jobs',
             tabBarIcon: ({ focused }) => <TabIcon label="💼" focused={focused} />,

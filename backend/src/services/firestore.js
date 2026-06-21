@@ -3,6 +3,29 @@ import { getFirestore } from '../firebase/admin.js';
 
 const JOBS_COLLECTION = 'jobs';
 const USERS_COLLECTION = 'users';
+const SETTINGS_DOC = 'settings/filters';
+
+/**
+ * Read the filter settings the app controls (country geoIds, time-posted range,
+ * sort order). Returns {} on error / missing.
+ */
+export async function getFilterSettings() {
+  try {
+    const doc = await getFirestore().doc(SETTINGS_DOC).get();
+    const data = doc.data() || {};
+    const geoIds = Array.isArray(data.geoIds)
+      ? data.geoIds.map((g) => String(g)).filter(Boolean)
+      : null;
+    return {
+      geoIds: geoIds && geoIds.length ? geoIds : null,
+      fTPR: data.timePosted ? String(data.timePosted) : null,
+      sortBy: data.sortBy ? String(data.sortBy) : null,
+    };
+  } catch (error) {
+    console.warn(`[Firestore] Could not read filter settings: ${error.message}`);
+    return {};
+  }
+}
 
 /**
  * Check whether a job document already exists.
@@ -32,6 +55,7 @@ export async function saveJob(job) {
       description: job.description || '',
       company: job.company || '',
       location: job.location || '',
+      country: job.country || '',
       publishedAt: job.publishedAt,
       notifiedAt: new Date().toISOString(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),

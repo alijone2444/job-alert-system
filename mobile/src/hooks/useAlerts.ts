@@ -16,6 +16,7 @@ function mapDocToJob(doc: FirebaseFirestoreTypes.QueryDocumentSnapshot): JobAler
     description: data.description ? String(data.description) : undefined,
     company: data.company ? String(data.company) : undefined,
     location: data.location ? String(data.location) : undefined,
+    country: data.country ? String(data.country) : undefined,
     publishedAt: data.publishedAt ? String(data.publishedAt) : undefined,
     notifiedAt: data.notifiedAt ? String(data.notifiedAt) : undefined,
     createdAt: data.createdAt as JobAlert['createdAt'],

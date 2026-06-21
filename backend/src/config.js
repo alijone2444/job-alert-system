@@ -57,10 +57,19 @@ export function loadConfig() {
 
   return {
     firebaseServiceAccount,
-    upworkRssUrl: requireEnv('UPWORK_RSS_URL'),
+    // Upwork is parked (its feed is dead / Cloudflare-blocked). Set
+    // UPWORK_ENABLED=true once a working source (API) is wired up.
+    upworkEnabled: optionalEnv('UPWORK_ENABLED', 'false').toLowerCase() === 'true',
+    upworkRssUrl: optionalEnv('UPWORK_RSS_URL', ''),
     linkedinSearchUrl: requireEnv('LINKEDIN_SEARCH_URL'),
-    linkedinLiAt: requireEnv('LINKEDIN_LI_AT'),
-    keywordFilter: optionalEnv('KEYWORD_FILTER', '').toLowerCase(),
+    // Comma-separated LinkedIn geoIds to restrict by country (each searched
+    // separately and merged). Empty = worldwide.
+    linkedinGeoIds: optionalEnv('LINKEDIN_GEO_IDS', '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    // Boolean keyword query (AND/OR/NOT). Case handled by the filter itself.
+    keywordFilter: optionalEnv('KEYWORD_FILTER', ''),
     maxJobsPerRun: parseInt(optionalEnv('MAX_JOBS_PER_RUN', '50'), 10),
   };
 }

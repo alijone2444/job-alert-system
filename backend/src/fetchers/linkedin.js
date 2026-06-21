@@ -1,27 +1,111 @@
 import { chromium } from 'playwright';
+import { compileKeywordQuery, matchesKeyword } from '../services/keywordFilter.js';
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+// LinkedIn's public "guest" jobs endpoint. It returns plain HTML job cards
+// (the .base-card markup) without requiring an authenticated SPA render, which
+// is far more reliable than scraping the logged-in /jobs/search page.
+const GUEST_ENDPOINT =
+  'https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search';
+
+const PAGE_SIZE = 25; // LinkedIn returns 25 cards per "start" page
+
+// Map LinkedIn geoIds to a clean country label for the app's country filter.
+const GEO_COUNTRY = {
+  '101022442': 'Pakistan',
+  '103644278': 'United States',
+  '101165590': 'United Kingdom',
+  '101174742': 'Canada',
+  '101282230': 'Germany',
+  '104305776': 'United Arab Emirates',
+  '102713980': 'India',
+};
+
 /**
- * Extract job ID from a LinkedIn job URL.
+ * Extract the numeric job ID from a card's entity URN or job URL.
+ * Guest URLs look like /jobs/view/<slug>-4012345678?... so the trailing
+ * digits are the ID, not /jobs/view/<digits>.
  */
-function extractJobId(url) {
-  if (!url) return null;
-  const match = url.match(/\/jobs\/view\/(\d+)/);
-  return match ? match[1] : null;
+function extractJobId(url, entityUrn) {
+  if (entityUrn) {
+    const m = entityUrn.match(/(\d{4,})/);
+    if (m) return m[1];
+  }
+  if (url) {
+    let m = url.match(/\/jobs\/view\/(?:[^/?]*-)?(\d{4,})/);
+    if (m) return m[1];
+    m = url.match(/(\d{6,})/);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 /**
- * Scrape job cards from the LinkedIn search results page.
+ * Translate a regular LinkedIn jobs search URL into the guest API URL.
+ * Carries over the meaningful filters (keywords, location, recency, etc.)
+ * and forces sort-by-date so the newest postings come first.
+ */
+function buildGuestSearchUrl(searchUrl, start, opts = {}) {
+  const { geoId = null, fTPR = null, sortBy = null } = opts;
+  let out;
+  try {
+    const src = new URL(searchUrl);
+
+    // Already a guest endpoint? Just adjust the start offset.
+    if (src.pathname.includes('seeMoreJobPostings')) {
+      out = src;
+    } else {
+      out = new URL(GUEST_ENDPOINT);
+      const passthrough = [
+        'keywords',
+        'location',
+        'geoId',
+        'f_TPR', // time posted range, e.g. r3600 = last hour, r86400 = last 24h
+        'f_WT', // work type: 1 on-site, 2 remote, 3 hybrid
+        'f_E', // experience level
+        'f_JT', // job type
+        'f_C', // company
+        'distance',
+        'sortBy',
+      ];
+      for (const key of passthrough) {
+        const value = src.searchParams.get(key);
+        if (value) out.searchParams.set(key, value);
+      }
+    }
+  } catch {
+    // Not a valid URL — treat the whole thing as a keywords query.
+    out = new URL(GUEST_ENDPOINT);
+    out.searchParams.set('keywords', searchUrl);
+  }
+
+  // Restrict to a specific country by geoId (overrides any free-text location).
+  if (geoId) {
+    out.searchParams.set('geoId', geoId);
+    out.searchParams.delete('location');
+  }
+
+  // App-controlled overrides (time posted range + sort).
+  if (fTPR) out.searchParams.set('f_TPR', fTPR);
+  if (sortBy) out.searchParams.set('sortBy', sortBy);
+
+  if (!out.searchParams.get('sortBy')) out.searchParams.set('sortBy', 'DD'); // date, newest first
+  out.searchParams.set('start', String(start));
+  return out.toString();
+}
+
+/**
+ * Parse the .base-card job cards from whatever HTML is currently loaded.
  */
 async function scrapeJobCards(page) {
   return page.evaluate(() => {
     const cards = document.querySelectorAll(
-      'div.job-search-card, li.jobs-search-results__list-item, div.base-card'
+      'li, div.base-card, div.job-search-card'
     );
-
     const results = [];
+    const seen = new Set();
 
     cards.forEach((card) => {
       const titleEl =
@@ -31,6 +115,7 @@ async function scrapeJobCards(page) {
 
       const companyEl =
         card.querySelector('.base-search-card__subtitle') ||
+        card.querySelector('h4.base-search-card__subtitle a') ||
         card.querySelector('h4.base-search-card__subtitle') ||
         card.querySelector('a.hidden-nested-link');
 
@@ -43,14 +128,25 @@ async function scrapeJobCards(page) {
         card.querySelector('a.job-card-container__link') ||
         titleEl?.closest('a');
 
+      const timeEl = card.querySelector('time');
+
+      const cardWithUrn =
+        card.getAttribute?.('data-entity-urn') ? card : card.querySelector('[data-entity-urn]');
+      const entityUrn = cardWithUrn?.getAttribute('data-entity-urn') || '';
+
       const title = titleEl?.textContent?.trim() || '';
       const company = companyEl?.textContent?.trim() || '';
       const location = locationEl?.textContent?.trim() || '';
       const link = linkEl?.href?.split('?')[0] || '';
+      const postedAt = timeEl?.getAttribute('datetime') || '';
 
-      if (title && link) {
-        results.push({ title, company, location, link });
-      }
+      if (!title || !link) return;
+
+      const dedupeKey = entityUrn || link;
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+
+      results.push({ title, company, location, link, entityUrn, postedAt });
     });
 
     return results;
@@ -58,21 +154,31 @@ async function scrapeJobCards(page) {
 }
 
 /**
- * Fetch jobs from LinkedIn using Playwright with injected li_at cookie.
- * @param {string} searchUrl
- * @param {string} liAtCookie
- * @param {string} keywordFilter
+ * Fetch jobs from LinkedIn via the public guest jobs endpoint.
+ *
+ * NOTE: the guest endpoint must be hit UNAUTHENTICATED. Injecting an li_at
+ * session cookie makes LinkedIn bounce between guest/authenticated URLs and
+ * fail with ERR_TOO_MANY_REDIRECTS, so we deliberately do not send it here.
+ *
+ * @param {string} searchUrl   LinkedIn jobs search URL (or a raw keywords string)
+ * @param {string} keywordFilter  optional boolean keyword query for client-side filtering
+ * @param {number} maxJobs     cap on jobs to return
+ * @param {string[]} geoIds    optional list of LinkedIn geoIds to restrict by country
+ *                             (each searched separately and merged)
  * @returns {Promise<Array>}
  */
-export async function fetchLinkedInJobs(searchUrl, liAtCookie, keywordFilter = '') {
+export async function fetchLinkedInJobs(
+  searchUrl,
+  keywordFilter = '',
+  maxJobs = 50,
+  geoIds = [],
+  options = {}
+) {
   if (!searchUrl) {
     throw new Error('LINKEDIN_SEARCH_URL is not configured');
   }
 
-  if (!liAtCookie) {
-    throw new Error('LINKEDIN_LI_AT cookie is missing. Extract it from your browser and set it as a secret.');
-  }
-
+  const compiledFilter = compileKeywordQuery(keywordFilter);
   let browser;
 
   try {
@@ -85,86 +191,94 @@ export async function fetchLinkedInJobs(searchUrl, liAtCookie, keywordFilter = '
       userAgent: USER_AGENT,
       viewport: { width: 1280, height: 900 },
       locale: 'en-US',
-    });
-
-    await context.addCookies([
-      {
-        name: 'li_at',
-        value: liAtCookie,
-        domain: '.linkedin.com',
-        path: '/',
-        httpOnly: true,
-        secure: true,
-        sameSite: 'None',
+      extraHTTPHeaders: {
+        'Accept-Language': 'en-US,en;q=0.9',
+        'X-Requested-With': 'XMLHttpRequest',
       },
-    ]);
+    });
 
     const page = await context.newPage();
+    const byId = new Map();
 
-    console.log('[LinkedIn] Navigating to job search URL...');
-    const response = await page.goto(searchUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000,
-    });
+    // Search each country (geoId) separately and merge; [null] = no geo restriction.
+    const targets = geoIds.length ? geoIds : [null];
+    const pagesPerTarget = Math.min(Math.ceil(maxJobs / PAGE_SIZE) + 1, 4);
 
-    if (!response || response.status() >= 400) {
-      throw new Error(`LinkedIn returned HTTP ${response?.status() ?? 'unknown'}`);
-    }
+    for (const geoId of targets) {
+      const country = geoId ? GEO_COUNTRY[geoId] || '' : '';
+      const label = geoId ? `${country || geoId}` : 'global';
 
-    // Wait for job cards or detect auth wall
-    try {
-      await page.waitForSelector(
-        'div.job-search-card, li.jobs-search-results__list-item, div.base-card',
-        { timeout: 30000 }
-      );
-    } catch {
-      const pageText = await page.textContent('body');
-      if (pageText?.toLowerCase().includes('sign in') || pageText?.toLowerCase().includes('authwall')) {
-        throw new Error(
-          'LinkedIn session cookie (li_at) appears invalid or expired. Re-extract the cookie from your browser.'
-        );
+      for (let pageIndex = 0; pageIndex < pagesPerTarget; pageIndex++) {
+        const url = buildGuestSearchUrl(searchUrl, pageIndex * PAGE_SIZE, {
+          geoId,
+          fTPR: options.fTPR,
+          sortBy: options.sortBy,
+        });
+        console.log(`[LinkedIn] ${label} — page ${pageIndex + 1}/${pagesPerTarget}...`);
+
+        let response;
+        try {
+          response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        } catch (error) {
+          console.warn(`[LinkedIn] ${label} page ${pageIndex + 1} navigation failed: ${error.message}`);
+          break;
+        }
+
+        const status = response?.status() ?? 0;
+        if (status === 429) {
+          console.warn('[LinkedIn] Rate limited (HTTP 429). Stopping this country.');
+          break;
+        }
+        if (status >= 400) {
+          console.warn(`[LinkedIn] ${label} page ${pageIndex + 1} returned HTTP ${status}. Stopping.`);
+          break;
+        }
+
+        const rawJobs = await scrapeJobCards(page);
+        if (!rawJobs.length) {
+          console.log(`[LinkedIn] ${label} — no more cards at page ${pageIndex + 1}.`);
+          break;
+        }
+
+        for (const job of rawJobs) {
+          const jobId = extractJobId(job.link, job.entityUrn);
+          if (!jobId || byId.has(jobId)) continue;
+
+          byId.set(jobId, {
+            id: `linkedin:${jobId}`,
+            platform: 'LinkedIn',
+            title: job.title,
+            link: job.link,
+            description: '',
+            company: job.company,
+            location: job.location,
+            country,
+            publishedAt: job.postedAt
+              ? new Date(job.postedAt).toISOString()
+              : new Date().toISOString(),
+          });
+        }
+
+        await page.waitForTimeout(800); // be gentle between requests
       }
-      console.warn('[LinkedIn] Job cards did not render in time; attempting scrape anyway');
     }
 
-    // Scroll to load more results
-    for (let i = 0; i < 3; i++) {
-      await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-      await page.waitForTimeout(1500);
-    }
-
-    const rawJobs = await scrapeJobCards(page);
-
-    if (!rawJobs.length) {
-      console.warn('[LinkedIn] No job cards found. Selectors may have changed or the search returned empty results.');
+    if (!byId.size) {
+      console.warn(
+        '[LinkedIn] No job cards found. The search may be empty, or LinkedIn changed its markup / rate-limited the request.'
+      );
       return [];
     }
 
-    const jobs = rawJobs
-      .map((job) => {
-        const jobId = extractJobId(job.link);
-        if (!jobId) return null;
+    const jobs = [...byId.values()].filter((job) => {
+      const haystack = `${job.title} ${job.company} ${job.location}`;
+      return matchesKeyword(haystack, compiledFilter);
+    });
 
-        return {
-          id: `linkedin:${jobId}`,
-          platform: 'LinkedIn',
-          title: job.title,
-          link: job.link,
-          description: '',
-          company: job.company,
-          location: job.location,
-          publishedAt: new Date().toISOString(),
-        };
-      })
-      .filter(Boolean)
-      .filter((job) => {
-        if (!keywordFilter) return true;
-        const haystack = `${job.title} ${job.company} ${job.location}`.toLowerCase();
-        return haystack.includes(keywordFilter);
-      });
-
-    console.log(`[LinkedIn] Scraped ${jobs.length} job(s)`);
-    return jobs;
+    console.log(
+      `[LinkedIn] Scraped ${byId.size} job(s), ${jobs.length} after keyword filter`
+    );
+    return jobs.slice(0, maxJobs);
   } catch (error) {
     throw new Error(`LinkedIn fetch failed: ${error.message}`);
   } finally {

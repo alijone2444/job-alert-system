@@ -2,8 +2,10 @@ name: Job Alert Cron
 
 on:
   schedule:
-    # Every 15 minutes
-    - cron: '*/15 * * * *'
+    # GitHub Actions cannot reliably run faster than ~5 minutes (and it throttles
+    # under load), so this is the practical floor here. For true 1-2 minute
+    # checking, run the always-on poller instead:  cd backend && npm run poll
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 concurrency:
@@ -36,11 +38,6 @@ jobs:
 
       - name: Run job alert engine
         working-directory: backend
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          UPWORK_RSS_URL: ${{ secrets.UPWORK_RSS_URL }}
-          LINKEDIN_SEARCH_URL: ${{ secrets.LINKEDIN_SEARCH_URL }}
-          LINKEDIN_LI_AT: ${{ secrets.LINKEDIN_LI_AT }}
-          KEYWORD_FILTER: ${{ secrets.KEYWORD_FILTER }}
-          MAX_JOBS_PER_RUN: ${{ secrets.MAX_JOBS_PER_RUN }}
+        # Config + credentials come from the committed backend/.env and
+        # backend/service-account.json (no GitHub Secrets needed).
         run: npm start

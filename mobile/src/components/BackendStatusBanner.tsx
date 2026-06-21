@@ -8,8 +8,9 @@ type Props = {
   onRefresh: () => void;
 };
 
-function Dot({ ok }: { ok: boolean }) {
-  return <View style={[styles.dot, { backgroundColor: ok ? '#34A853' : '#EA4335' }]} />;
+function Dot({ ok, neutral }: { ok: boolean; neutral?: boolean }) {
+  const color = neutral ? '#9AA0A6' : ok ? '#34A853' : '#EA4335';
+  return <View style={[styles.dot, { backgroundColor: color }]} />;
 }
 
 function formatTime(iso: string | null): string {
@@ -27,9 +28,12 @@ function formatTime(iso: string | null): string {
 function platformLine(
   name: string,
   platform: BackendCronStatus['upwork']
-): { ok: boolean; label: string; detail: string } {
+): { ok: boolean; neutral?: boolean; label: string; detail: string } {
   if (!platform) {
     return { ok: false, label: name, detail: 'No data' };
+  }
+  if (platform.status === 'disabled') {
+    return { ok: true, neutral: true, label: name, detail: 'Disabled (parked)' };
   }
   if (platform.status === 'error') {
     return { ok: false, label: name, detail: platform.error ?? 'Fetch failed' };
@@ -83,7 +87,7 @@ export function BackendStatusBanner({ status, loading, onRefresh }: Props) {
 
       <View style={styles.grid}>
         <View style={styles.item}>
-          <Dot ok={upwork.ok} />
+          <Dot ok={upwork.ok} neutral={upwork.neutral} />
           <Text style={styles.label}>{upwork.label}</Text>
           <Text style={styles.value}>{upwork.detail}</Text>
         </View>

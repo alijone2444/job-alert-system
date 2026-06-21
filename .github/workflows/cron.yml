@@ -32,9 +32,7 @@ jobs:
         working-directory: backend
         run: npm ci
 
-      - name: Install Playwright browsers and system dependencies
-        working-directory: backend
-        run: npx playwright install --with-deps chromium
+      # No Playwright/Chromium needed — LinkedIn is fetched with plain fetch + cheerio.
 
       - name: Run job alert engine
         working-directory: backend

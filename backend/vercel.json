@@ -1,8 +1,9 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "functions": {
-    "api/run.js": {
-      "maxDuration": 30
-    }
-  }
+  "version": 2,
+  "builds": [
+    { "src": "api/run.js", "use": "@vercel/node" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "/api/run.js" }
+  ]
 }

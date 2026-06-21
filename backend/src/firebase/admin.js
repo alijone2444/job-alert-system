@@ -20,6 +20,14 @@ export function initFirebase(serviceAccount) {
     credential: admin.credential.cert(serviceAccount),
   });
 
+  // Use Firestore over REST instead of gRPC — gRPC is unreliable / crashes in
+  // serverless (Vercel/Lambda) short-lived functions.
+  try {
+    admin.firestore().settings({ preferRest: true });
+  } catch {
+    // settings() can only be called once; ignore if already set
+  }
+
   initialized = true;
   console.log(`[Firebase] Admin SDK initialized for project: ${serviceAccount.project_id}`);
   return admin.app();

@@ -19,7 +19,7 @@ const DEFAULT_KEYWORD_FILTER =
 // Flutter. f_E=1,2,3,4 = internship..mid-senior (excludes Director/Exec).
 const DEFAULT_LINKEDIN_SEARCH_URL =
   'https://www.linkedin.com/jobs/search/?keywords=' +
-  '(%22react%20native%22%20OR%20%22react.js%22%20OR%20reactjs%20OR%20mern%20OR%20%22node.js%22%20OR%20nodejs%20OR%20%22next.js%22%20OR%20express%20OR%20mongodb%20OR%20redux%20OR%20%22full%20stack%22%20OR%20%22.net%22%20OR%20%22asp.net%22%20OR%20%22c%23%22%20OR%20javascript%20OR%20typescript%20OR%20%22software%20engineer%22%20OR%20%22web%20developer%22%20OR%20%22three.js%22%20OR%20%22ai%20engineer%22)' +
+  '(%22react%20native%22%20OR%20%22react.js%22%20OR%20reactjs%20OR%20mern%20OR%20%22mern%20stack%22%20OR%20%22node.js%22%20OR%20nodejs%20OR%20%22node%20developer%22%20OR%20%22next.js%22%20OR%20express%20OR%20mongodb%20OR%20redux%20OR%20%22full%20stack%22%20OR%20%22full%20stack%20developer%22%20OR%20frontend%20OR%20%22frontend%20developer%22%20OR%20backend%20OR%20%22backend%20developer%22%20OR%20%22.net%22%20OR%20%22asp.net%22%20OR%20%22c%23%22%20OR%20javascript%20OR%20typescript%20OR%20%22software%20engineer%22%20OR%20%22software%20developer%22%20OR%20%22web%20developer%22%20OR%20%22three.js%22%20OR%20%22ai%20engineer%22)' +
   '&f_E=1,2,3,4&f_TPR=r86400&sortBy=DD';
 
 function requireEnv(name) {

@@ -156,7 +156,8 @@ export async function fetchLinkedInJobs(
   const byId = new Map();
 
   const targets = geoIds.length ? geoIds : [null];
-  const pagesPerTarget = Math.min(Math.ceil(maxJobs / PAGE_SIZE) + 1, 4);
+  // Go deeper (more pages) to catch more local/smaller-company postings.
+  const pagesPerTarget = Math.min(Math.ceil(maxJobs / PAGE_SIZE) + 2, 7);
 
   for (const geoId of targets) {
     const country = geoId ? GEO_COUNTRY[geoId] || '' : '';

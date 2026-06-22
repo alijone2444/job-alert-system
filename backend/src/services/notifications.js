@@ -1,6 +1,13 @@
 import { getMessaging } from '../firebase/admin.js';
 import { removeInvalidTokens } from './firestore.js';
 
+// Accent color per source (shows on the Android notification + small icon).
+const PLATFORM_COLOR = {
+  LinkedIn: '#0A66C2', // LinkedIn blue
+  Remote: '#14A800', // green — visually distinct from LinkedIn
+  Upwork: '#14A800',
+};
+
 /**
  * Send a high-priority FCM notification to all registered devices.
  * @param {string[]} tokens
@@ -44,6 +51,7 @@ export async function sendJobAlert(tokens, job) {
           channelId: 'job_alerts',
           priority: 'high',
           defaultSound: true,
+          color: PLATFORM_COLOR[job.platform] || '#1A73E8',
         },
       },
       apns: {

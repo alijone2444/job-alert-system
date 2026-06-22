@@ -10,13 +10,18 @@ import {
   getInitialNotification,
   subscribeToTokenRefresh,
 } from './src/services/notifications';
-import { getMessageLink } from './src/utils/messageData';
+import { getMessageLink, parseRemoteMessageData } from './src/utils/messageData';
+import { addViewed } from './src/services/viewedJobs';
 import { logger } from './src/utils/logger';
 
 export default function App() {
   const [deviceId, setDeviceId] = useState<string | null>(null);
 
   const handleNotificationTap = useCallback((data: Record<string, unknown> | undefined) => {
+    // Opening a job from its notification should also mark it viewed.
+    const jobId = parseRemoteMessageData(data).jobId;
+    if (jobId) addViewed(jobId);
+
     const link = getMessageLink(data);
     if (link) {
       logger.info('App', `Opening job link: ${link}`);

@@ -21,3 +21,12 @@ export async function saveViewed(ids: Set<string>): Promise<void> {
     // ignore storage errors
   }
 }
+
+/** Mark a single job id viewed (used when opening from a notification). */
+export async function addViewed(id: string): Promise<void> {
+  if (!id) return;
+  const ids = await loadViewed();
+  if (ids.has(id)) return;
+  ids.add(id);
+  await saveViewed(ids);
+}

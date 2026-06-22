@@ -80,6 +80,8 @@ export function loadConfig() {
     // Upwork is parked (its feed is dead / Cloudflare-blocked). Set
     // UPWORK_ENABLED=true once a working source (API) is wired up.
     upworkEnabled: optionalEnv('UPWORK_ENABLED', 'false').toLowerCase() === 'true',
+    // Remotive (remote jobs) — on by default.
+    remoteEnabled: optionalEnv('REMOTE_ENABLED', 'true').toLowerCase() !== 'false',
     upworkRssUrl: optionalEnv('UPWORK_RSS_URL', ''),
     linkedinSearchUrl: optionalEnv('LINKEDIN_SEARCH_URL', '') || DEFAULT_LINKEDIN_SEARCH_URL,
     // Comma-separated LinkedIn geoIds to restrict by country (each searched

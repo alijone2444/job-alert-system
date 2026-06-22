@@ -29,6 +29,7 @@ function formatDate(job: JobAlert): string {
 
 function platformColor(platform: string): string {
   if (platform === 'LinkedIn') return '#0A66C2';
+  if (platform === 'Remote') return '#14A800';
   if (platform === 'Upwork') return '#14A800';
   return '#5F6368';
 }

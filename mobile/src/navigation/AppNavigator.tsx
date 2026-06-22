@@ -7,6 +7,7 @@ import { SystemStatusScreen } from '../screens/SystemStatusScreen';
 
 export type RootTabParamList = {
   LinkedIn: undefined;
+  Remote: undefined;
   Status: undefined;
 };
 
@@ -18,8 +19,9 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   );
 }
 
-// Platform-scoped wrapper. (Upwork tab is disabled for now — it's parked.)
+// Platform-scoped wrappers.
 const LinkedInScreen = () => <AlertsScreen platform="LinkedIn" />;
+const RemoteScreen = () => <AlertsScreen platform="Remote" />;
 
 export function AppNavigator() {
   return (
@@ -45,8 +47,16 @@ export function AppNavigator() {
           name="LinkedIn"
           component={LinkedInScreen}
           options={{
-            tabBarLabel: 'Jobs',
+            tabBarLabel: 'LinkedIn',
             tabBarIcon: ({ focused }) => <TabIcon label="💼" focused={focused} />,
+          }}
+        />
+        <Tab.Screen
+          name="Remote"
+          component={RemoteScreen}
+          options={{
+            tabBarLabel: 'Remote',
+            tabBarIcon: ({ focused }) => <TabIcon label="🌐" focused={focused} />,
           }}
         />
         <Tab.Screen

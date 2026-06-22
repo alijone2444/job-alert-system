@@ -2,6 +2,7 @@ import { loadConfig } from './config.js';
 import { initFirebase } from './firebase/admin.js';
 import { fetchUpworkJobs } from './fetchers/upwork.js';
 import { fetchLinkedInJobs } from './fetchers/linkedin.js';
+import { fetchRemotiveJobs } from './fetchers/remotive.js';
 import { processJobs } from './services/jobProcessor.js';
 import { getFilterSettings } from './services/firestore.js';
 import { buildCronReport, saveCronRunReport } from './services/cronReport.js';
@@ -11,6 +12,7 @@ const PAKISTAN_GEO_ID = '101022442'; // default country when nothing is selected
 const emptyResults = () => ({
   upwork: { status: 'pending', jobs: [], error: null },
   linkedin: { status: 'pending', jobs: [], error: null },
+  remote: { status: 'pending', jobs: [], error: null },
 });
 
 /**
@@ -73,21 +75,38 @@ export async function runEngine() {
       console.error(`[LinkedIn] ${error.message}`);
     }
 
-    const allJobs = [...results.upwork.jobs, ...results.linkedin.jobs];
+    if (!config.remoteEnabled) {
+      results.remote.status = 'disabled';
+    } else {
+      try {
+        results.remote.jobs = await fetchRemotiveJobs(config.keywordFilter, config.maxJobsPerRun);
+        results.remote.status = 'ok';
+      } catch (error) {
+        results.remote.status = 'error';
+        results.remote.error = error.message;
+        console.error(`[Remotive] ${error.message}`);
+      }
+    }
+
+    const allJobs = [
+      ...results.upwork.jobs,
+      ...results.linkedin.jobs,
+      ...results.remote.jobs,
+    ];
 
     if (!allJobs.length) {
-      if (results.upwork.status === 'error' && results.linkedin.status === 'error') {
-        console.error('=== Job Alert Engine Failed — both fetchers errored ===');
+      if (results.linkedin.status === 'error' && results.remote.status === 'error') {
+        console.error('=== Job Alert Engine Failed — fetchers errored ===');
         exitCode = 1;
       } else {
         console.log('=== Job Alert Engine Finished — no jobs fetched this run ===');
-        console.log(`  Upwork:   ${results.upwork.jobs.length} jobs (${results.upwork.status})`);
         console.log(`  LinkedIn: ${results.linkedin.jobs.length} jobs (${results.linkedin.status})`);
+        console.log(`  Remote:   ${results.remote.jobs.length} jobs (${results.remote.status})`);
       }
       return exitCode;
     }
 
-    console.log(`[Main] Combined ${allJobs.length} job(s) from both platforms`);
+    console.log(`[Main] Combined ${allJobs.length} job(s) from all sources`);
     stats = await processJobs(allJobs, config.maxJobsPerRun);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

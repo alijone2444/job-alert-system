@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Linking,
   Alert,
+  AppState,
 } from 'react-native';
 import { useAlerts } from '../hooks/useAlerts';
 import { AlertItem } from '../components/AlertItem';
@@ -42,8 +43,8 @@ const SHOW_OPTIONS = [
 const DEFAULT_SHOW = '20';
 
 type Props = {
-  /** When set, only jobs from this platform are shown (e.g. an Upwork-only tab). */
-  platform?: 'LinkedIn' | 'Upwork';
+  /** When set, only jobs from this platform are shown. */
+  platform?: 'LinkedIn' | 'Upwork' | 'Remote';
   title?: string;
 };
 
@@ -78,6 +79,13 @@ export function AlertsScreen({ platform, title }: Props) {
       setSort(f.sortBy);
     });
     loadViewed().then(setViewed);
+
+    // Re-sync viewed jobs when returning to the app (e.g. after opening a job
+    // from its notification, which marks it viewed).
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') loadViewed().then(setViewed);
+    });
+    return () => sub.remove();
   }, []);
 
   // Mark a job as viewed (persisted locally) so its card greys out.
@@ -134,7 +142,8 @@ export function AlertsScreen({ platform, title }: Props) {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const matched = platformJobs.filter((job) => {
-      if (!inCountry(job, location)) return false;
+      // Remote jobs aren't country-specific, so don't apply the country filter.
+      if (platform !== 'Remote' && !inCountry(job, location)) return false;
       if (q) {
         const hay = `${job.title} ${job.company ?? ''} ${job.location ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;

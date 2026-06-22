@@ -52,10 +52,12 @@ export async function runEngine() {
       }
     }
 
+    // The app controls country + time-range + sort (settings/filters in
+    // Firestore). Shared by LinkedIn + Remote. Until a country is picked,
+    // default to Pakistan.
+    const settings = await getFilterSettings();
+
     try {
-      // The app controls country + time-range + sort (settings/filters in
-      // Firestore). Until the user picks a country, default to Pakistan.
-      const settings = await getFilterSettings();
       const geoIds = settings.geoIds || [PAKISTAN_GEO_ID];
       console.log(
         `[LinkedIn] geoIds: ${geoIds.join(', ')} | time: ${settings.fTPR || 'default'} | sort: ${settings.sortBy || 'default'}`
@@ -79,7 +81,11 @@ export async function runEngine() {
       results.remote.status = 'disabled';
     } else {
       try {
-        results.remote.jobs = await fetchRemotiveJobs(config.keywordFilter, config.maxJobsPerRun);
+        results.remote.jobs = await fetchRemotiveJobs(
+          config.keywordFilter,
+          config.maxJobsPerRun,
+          settings.fTPR || 'r86400'
+        );
         results.remote.status = 'ok';
       } catch (error) {
         results.remote.status = 'error';

@@ -217,9 +217,9 @@ export async function fetchLinkedInJobs(
     return [];
   }
 
-  const jobs = [...byId.values()].filter((job) =>
-    matchesKeyword(`${job.title} ${job.company} ${job.location}`, compiledFilter)
-  );
+  // Filter on the TITLE only — keeps the include/exclude precise (e.g. "Game"
+  // in a company name shouldn't drop an otherwise-relevant job).
+  const jobs = [...byId.values()].filter((job) => matchesKeyword(job.title, compiledFilter));
   console.log(`[LinkedIn] Scraped ${byId.size} job(s), ${jobs.length} after keyword filter`);
   return jobs.slice(0, maxJobs);
 }

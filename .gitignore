@@ -21,3 +21,4 @@ mobile/android/.gradle/
 mobile/android/app/build/
 mobile/android/local.properties
 job-alert-system-*-firebase-adminsdk-*.json
+_vercel-env.txt

@@ -30,6 +30,16 @@ import {
   setTimePosted,
   setSortBy,
 } from '../services/filterSettings';
+import { loadViewed, saveViewed } from '../services/viewedJobs';
+
+// How many (most recent) jobs to show.
+const SHOW_OPTIONS = [
+  { label: 'Last 10', value: '10' },
+  { label: 'Last 20', value: '20' },
+  { label: 'Last 50', value: '50' },
+  { label: 'All', value: '100000' },
+];
+const DEFAULT_SHOW = '20';
 
 type Props = {
   /** When set, only jobs from this platform are shown (e.g. an Upwork-only tab). */
@@ -57,6 +67,8 @@ export function AlertsScreen({ platform, title }: Props) {
   const [location, setLocation] = useState(DEFAULT_COUNTRY);
   const [time, setTime] = useState(DEFAULT_TIME);
   const [sort, setSort] = useState(DEFAULT_SORT);
+  const [show, setShow] = useState(DEFAULT_SHOW);
+  const [viewed, setViewed] = useState<Set<string>>(new Set());
 
   // Load the filters the backend is currently using (persisted in Firestore).
   useEffect(() => {
@@ -64,6 +76,18 @@ export function AlertsScreen({ platform, title }: Props) {
       setLocation(f.country);
       setTime(f.timePosted);
       setSort(f.sortBy);
+    });
+    loadViewed().then(setViewed);
+  }, []);
+
+  // Mark a job as viewed (persisted locally) so its card greys out.
+  const markViewed = useCallback((id: string) => {
+    setViewed((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      saveViewed(next);
+      return next;
     });
   }, []);
 
@@ -89,6 +113,7 @@ export function AlertsScreen({ platform, title }: Props) {
       Alert.alert('No link', 'This job alert does not have a valid URL.');
       return;
     }
+    markViewed(job.id);
     try {
       logger.info('Alerts', `Opening job: ${job.title}`);
       // NOTE: do NOT use Linking.canOpenURL here — on Android 11+ it returns
@@ -97,7 +122,7 @@ export function AlertsScreen({ platform, title }: Props) {
     } catch {
       Alert.alert('Could not open link', job.link);
     }
-  }, []);
+  }, [markViewed]);
 
   // Jobs for this tab's platform (or all platforms).
   const platformJobs = useMemo(
@@ -105,10 +130,10 @@ export function AlertsScreen({ platform, title }: Props) {
     [alerts, platform]
   );
 
-  // Apply country + search filters.
+  // Apply country + search filters, then cap to the chosen "show" count.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return platformJobs.filter((job) => {
+    const matched = platformJobs.filter((job) => {
       if (!inCountry(job, location)) return false;
       if (q) {
         const hay = `${job.title} ${job.company ?? ''} ${job.location ?? ''}`.toLowerCase();
@@ -116,7 +141,8 @@ export function AlertsScreen({ platform, title }: Props) {
       }
       return true;
     });
-  }, [platformJobs, query, location]);
+    return matched.slice(0, parseInt(show, 10) || 20);
+  }, [platformJobs, query, location, show]);
 
   const headerTitle = title ?? (platform ? `${platform} Jobs` : 'Job Alerts');
 
@@ -160,11 +186,16 @@ export function AlertsScreen({ platform, title }: Props) {
       </View>
 
       {/* Filters — country drives both the list and what the backend fetches;
-          posted-within + sort are server-side and apply on the next poll. */}
+          posted-within + sort are server-side; show is a local count cap. */}
       <View style={styles.filters}>
-        <Dropdown label="Country" value={location} options={COUNTRY_OPTIONS} onSelect={onSelectCountry} />
-        <Dropdown label="Posted" value={time} options={TIME_OPTIONS} onSelect={onSelectTime} />
-        <Dropdown label="Sort" value={sort} options={SORT_OPTIONS} onSelect={onSelectSort} />
+        <View style={styles.filterRow}>
+          <Dropdown label="Country" value={location} options={COUNTRY_OPTIONS} onSelect={onSelectCountry} />
+          <Dropdown label="Posted" value={time} options={TIME_OPTIONS} onSelect={onSelectTime} />
+        </View>
+        <View style={styles.filterRow}>
+          <Dropdown label="Sort" value={sort} options={SORT_OPTIONS} onSelect={onSelectSort} />
+          <Dropdown label="Show" value={show} options={SHOW_OPTIONS} onSelect={setShow} />
+        </View>
       </View>
 
       {error && (
@@ -176,7 +207,9 @@ export function AlertsScreen({ platform, title }: Props) {
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <AlertItem job={item} onPress={openJobLink} />}
+        renderItem={({ item }) => (
+          <AlertItem job={item} onPress={openJobLink} viewed={viewed.has(item.id)} />
+        )}
         contentContainerStyle={filtered.length === 0 ? styles.emptyList : styles.list}
         keyboardShouldPersistTaps="handled"
         refreshControl={
@@ -223,10 +256,13 @@ const styles = StyleSheet.create({
   },
   clearText: { color: '#9AA0A6', fontSize: 14 },
   filters: {
-    flexDirection: 'row',
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 4,
+    gap: 10,
+  },
+  filterRow: {
+    flexDirection: 'row',
     gap: 8,
   },
   list: { paddingTop: 4, paddingBottom: 32 },

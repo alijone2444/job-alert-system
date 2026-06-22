@@ -5,6 +5,7 @@ import { JobAlert } from '../types/job';
 type Props = {
   job: JobAlert;
   onPress: (job: JobAlert) => void;
+  viewed?: boolean;
 };
 
 function formatDate(job: JobAlert): string {
@@ -32,26 +33,34 @@ function platformColor(platform: string): string {
   return '#5F6368';
 }
 
-export function AlertItem({ job, onPress }: Props) {
+export function AlertItem({ job, onPress, viewed = false }: Props) {
   return (
     <TouchableOpacity
-      style={styles.card}
+      style={[styles.card, viewed && styles.cardViewed]}
       onPress={() => onPress(job)}
       activeOpacity={0.7}
     >
       <View style={styles.header}>
-        <View style={[styles.badge, { backgroundColor: platformColor(job.platform) }]}>
+        <View
+          style={[
+            styles.badge,
+            { backgroundColor: viewed ? '#BDC1C6' : platformColor(job.platform) },
+          ]}
+        >
           <Text style={styles.badgeText}>{job.platform}</Text>
         </View>
-        <Text style={styles.date}>{formatDate(job)}</Text>
+        <Text style={styles.date}>
+          {viewed ? 'Viewed · ' : ''}
+          {formatDate(job)}
+        </Text>
       </View>
 
-      <Text style={styles.title} numberOfLines={2}>
+      <Text style={[styles.title, viewed && styles.titleViewed]} numberOfLines={2}>
         {job.title}
       </Text>
 
       {(job.company || job.location) && (
-        <Text style={styles.meta} numberOfLines={1}>
+        <Text style={[styles.meta, viewed && styles.metaViewed]} numberOfLines={1}>
           {[job.company, job.location].filter(Boolean).join(' · ')}
         </Text>
       )}
@@ -71,6 +80,20 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 2,
+  },
+  cardViewed: {
+    backgroundColor: '#ECEFF1',
+    shadowOpacity: 0,
+    elevation: 0,
+    borderWidth: 1,
+    borderColor: '#E0E3E7',
+  },
+  titleViewed: {
+    color: '#80868B',
+    fontWeight: '500',
+  },
+  metaViewed: {
+    color: '#9AA0A6',
   },
   header: {
     flexDirection: 'row',

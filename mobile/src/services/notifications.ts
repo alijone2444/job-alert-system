@@ -1,6 +1,6 @@
 import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import { PermissionsAndroid, Platform } from 'react-native';
-import { getDeviceId, saveFcmToken, subscribeToTokenRefresh } from './device';
+import { getDeviceId, registerDevice, subscribeToTokenRefresh } from './device';
 import { logger } from '../utils/logger';
 
 export type NotificationSetupResult = {
@@ -57,7 +57,7 @@ export async function setupPushNotifications(): Promise<NotificationSetupResult>
     fcmToken = await messaging().getToken();
     if (fcmToken) {
       logger.success('FCM', `Token received: ${fcmToken.slice(0, 24)}...`);
-      await saveFcmToken(deviceId, fcmToken);
+      await registerDevice(deviceId, fcmToken);
       logger.success('PushSetup', 'Push notifications fully configured!');
     } else {
       logger.warn('FCM', 'getToken() returned empty token');

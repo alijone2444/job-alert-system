@@ -1,9 +1,17 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "api/run.js", "use": "@vercel/node" }
-  ],
+  "builds": [{ "src": "api/*.js", "use": "@vercel/node" }],
   "routes": [
+    { "src": "/api/run", "dest": "/api/run.js" },
+    { "src": "/api/health", "dest": "/api/health.js" },
+    { "src": "/api/sources", "dest": "/api/sources.js" },
+    { "src": "/api/taxonomy", "dest": "/api/taxonomy.js" },
+    { "src": "/api/register", "dest": "/api/register.js" },
+    { "src": "/api/feed", "dest": "/api/feed.js" },
+    { "src": "/api/preferences", "dest": "/api/preferences.js" },
+    { "src": "/api/interactions", "dest": "/api/interactions.js" },
+    { "src": "/api/rescore", "dest": "/api/rescore.js" },
+    { "src": "/", "dest": "/api/health.js" },
     { "src": "/(.*)", "dest": "/api/run.js" }
   ]
 }

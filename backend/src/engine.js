@@ -1,156 +1,174 @@
+/**
+ * The engine — one full cycle, triggered every ~2 minutes by cron-job.org via
+ * `GET /api/run`.
+ *
+ *   ingest (fetch -> normalize -> dedupe -> enrich -> store)
+ *      |
+ *   fan-out (score every new job against every user -> feeds + push)
+ *      |
+ *   maintenance (retention prune, telemetry)
+ *
+ * BACKWARD COMPATIBILITY: the exported name, signature and return value are
+ * unchanged (`runEngine(): Promise<number>` returning an exit code, never
+ * calling process.exit). `api/run.js`, `src/index.js` and `src/poll.js` all
+ * keep working untouched — the existing cron URL does not change.
+ *
+ * WHY the whole run is budgeted: this used to be a fetch-and-notify script
+ * where overrunning was harmless. It is now a multi-stage pipeline, and on
+ * Vercel an overrun is a hard kill with nothing persisted. The budget makes a
+ * slow run degrade into "less work this cycle" instead of "no work at all" —
+ * and with a 2-minute cadence, the next run picks up the remainder anyway.
+ */
+
 import { loadConfig } from './config.js';
 import { initFirebase } from './firebase/admin.js';
-import { fetchUpworkJobs } from './fetchers/upwork.js';
-import { fetchLinkedInJobs } from './fetchers/linkedin.js';
-import { fetchRemotiveJobs } from './fetchers/remotive.js';
-import { processJobs } from './services/jobProcessor.js';
-import { getFilterSettings } from './services/firestore.js';
+import { createLogger } from './core/logger.js';
+import { createBudget } from './core/http.js';
+import { runIngestion } from './pipeline/ingest.js';
+import { fanOut } from './reco/fanout.js';
+import * as usersRepo from './repositories/usersRepo.js';
+import * as jobsRepo from './repositories/jobsRepo.js';
+import {
+  getIngestSettings,
+  getScoringConfig,
+  getActiveCountries,
+} from './repositories/settingsRepo.js';
 import { buildCronReport, saveCronRunReport } from './services/cronReport.js';
 
-const PAKISTAN_GEO_ID = '101022442'; // default country when nothing is selected yet
+const log = createLogger('Engine');
 
-const emptyResults = () => ({
-  upwork: { status: 'pending', jobs: [], error: null },
-  linkedin: { status: 'pending', jobs: [], error: null },
-  remote: { status: 'pending', jobs: [], error: null },
-});
+/** Prune at most once every ~30 minutes rather than on every 2-minute run. */
+const PRUNE_PROBABILITY = 0.07;
+
+/** Fan-out never gets less than this, however long ingestion took. */
+const FANOUT_MIN_BUDGET_MS = 12_000;
+
+/** Shares of the run budget reserved for fetching and for detail enrichment. */
+const FETCH_BUDGET_SHARE = 0.45;
+const ENRICH_BUDGET_SHARE = 0.18;
 
 /**
- * Run one fetch -> dedup -> notify -> save cycle.
- * Returns an exit code (0 ok, 1 failure). Does NOT call process.exit, so it is
- * safe to call repeatedly from the always-on poller (src/poll.js).
+ * @returns {Promise<number>} exit code — 0 ok, 1 failure
  */
 export async function runEngine() {
-  const startTime = Date.now();
-  let config;
-  let results = emptyResults();
-  let stats = { processed: 0, skipped: 0, notified: 0, errors: 0 };
+  const startedAt = Date.now();
+
+  let firebaseReady = false;
   let fatalError = null;
   let exitCode = 0;
-  let firebaseReady = false;
+  let sourceReports = [];
+  let ingestStats = {};
+  let fanoutStats = {};
 
-  console.log('=== Job Alert Engine Started ===');
-  console.log(`Timestamp: ${new Date().toISOString()}`);
-  console.log(`Run source: ${process.env.GITHUB_ACTIONS === 'true' ? 'GitHub Actions (cron)' : 'Local'}`);
+  log.info('run started', { at: new Date().toISOString() });
 
   try {
-    config = loadConfig();
+    const config = loadConfig();
     initFirebase(config.firebaseServiceAccount);
     firebaseReady = true;
 
-    if (!config.upworkEnabled) {
-      results.upwork.status = 'disabled';
-      console.log('[Upwork] Disabled (UPWORK_ENABLED is not true) — skipping.');
-    } else {
-      try {
-        results.upwork.jobs = await fetchUpworkJobs(config.upworkRssUrl, config.keywordFilter);
-        results.upwork.status = 'ok';
-      } catch (error) {
-        results.upwork.status = 'error';
-        results.upwork.error = error.message;
-        console.error(`[Upwork] ${error.message}`);
-      }
+    const settings = await getIngestSettings();
+    const scoringConfig = await getScoringConfig();
+
+    /**
+     * THREE budgets, and the split is load-bearing.
+     *
+     * A single shared budget was tried first and failed twice, both times
+     * silently: fetching consumed everything, so fan-out was skipped and no
+     * user's feed was ever built; then enrichment was skipped, so LinkedIn
+     * jobs never gained the skills data the scorer needs. In both cases the
+     * run reported "success" while doing nothing useful.
+     *
+     * So each stage gets a guaranteed slice, ordered by how much the PRODUCT
+     * depends on it — fan-out is the product, enrichment is what makes
+     * personalisation accurate, fetching merely supplies raw material and is
+     * the one stage that can safely be cut short, because sources rotate and
+     * the next run (two minutes later) picks up what this one skipped.
+     *
+     * Only the budgets whose stage starts NOW are created here; the later
+     * stages receive a duration and start their own clock when they begin.
+     */
+    const budget = createBudget(settings.runBudgetMs);
+    const fetchBudget = createBudget(Math.round(settings.runBudgetMs * FETCH_BUDGET_SHARE));
+    const enrichBudgetMs = Math.round(settings.runBudgetMs * ENRICH_BUDGET_SHARE);
+
+    /* ---------------------------------------------------------------- */
+    /* Which countries to fetch is driven by what users actually want.   */
+    /* Fetching all 12 taxonomy countries would burn the entire budget   */
+    /* on geographies nobody has selected.                               */
+    /* ---------------------------------------------------------------- */
+    const users = await usersRepo.listUsers();
+    const preferencesByUser = await usersRepo.getPreferencesForUsers(
+      users.map((user) => user.userId)
+    );
+    const countries = await getActiveCountries(preferencesByUser);
+
+    log.info('run context', {
+      users: users.length,
+      countries: countries.length ? countries : 'worldwide',
+      budgetMs: settings.runBudgetMs,
+    });
+
+    /* ----------------------------- INGEST ---------------------------- */
+    const ingestion = await runIngestion({
+      countries,
+      settings,
+      budget: fetchBudget,
+      enrichBudgetMs,
+    });
+    sourceReports = ingestion.sourceReports;
+    ingestStats = ingestion.stats;
+
+    /* ---------------------------- FAN-OUT ---------------------------- */
+    // Runs even when nothing new arrived: a user who just changed their
+    // preferences still needs their feed rebuilt this cycle.
+    //
+    // Given a GUARANTEED floor rather than "whatever ingestion left over".
+    // Without the floor a slow fetch silently produces a run that stores jobs
+    // and shows none of them — the failure this pipeline exists to avoid.
+    fanoutStats = await fanOut({
+      newJobs: ingestion.newJobs,
+      scoringConfig,
+      budget: createBudget(Math.max(FANOUT_MIN_BUDGET_MS, budget.remainingMs())),
+      notify: true,
+    });
+
+    /* -------------------------- MAINTENANCE -------------------------- */
+    if (Math.random() < PRUNE_PROBABILITY && !budget.expired(8_000)) {
+      await jobsRepo.pruneOlderThan(settings.retentionMs);
     }
 
-    // The app controls country + time-range + sort (settings/filters in
-    // Firestore). Shared by LinkedIn + Remote. Until a country is picked,
-    // default to Pakistan.
-    const settings = await getFilterSettings();
+    const failedSources = sourceReports.filter((report) => report.status === 'error');
+    if (failedSources.length && failedSources.length === sourceReports.length) exitCode = 1;
 
-    try {
-      const geoIds = settings.geoIds || [PAKISTAN_GEO_ID];
-      console.log(
-        `[LinkedIn] geoIds: ${geoIds.join(', ')} | time: ${settings.fTPR || 'default'} | sort: ${settings.sortBy || 'default'}`
-      );
-
-      results.linkedin.jobs = await fetchLinkedInJobs(
-        config.linkedinSearchUrl,
-        config.keywordFilter,
-        config.maxJobsPerRun,
-        geoIds,
-        { fTPR: settings.fTPR, sortBy: settings.sortBy }
-      );
-      results.linkedin.status = 'ok';
-    } catch (error) {
-      results.linkedin.status = 'error';
-      results.linkedin.error = error.message;
-      console.error(`[LinkedIn] ${error.message}`);
-    }
-
-    if (!config.remoteEnabled) {
-      results.remote.status = 'disabled';
-    } else {
-      try {
-        results.remote.jobs = await fetchRemotiveJobs(
-          config.keywordFilter,
-          config.maxJobsPerRun,
-          settings.fTPR || 'r86400'
-        );
-        results.remote.status = 'ok';
-      } catch (error) {
-        results.remote.status = 'error';
-        results.remote.error = error.message;
-        console.error(`[Remotive] ${error.message}`);
-      }
-    }
-
-    const allJobs = [
-      ...results.upwork.jobs,
-      ...results.linkedin.jobs,
-      ...results.remote.jobs,
-    ];
-
-    if (!allJobs.length) {
-      if (results.linkedin.status === 'error' && results.remote.status === 'error') {
-        console.error('=== Job Alert Engine Failed — fetchers errored ===');
-        exitCode = 1;
-      } else {
-        console.log('=== Job Alert Engine Finished — no jobs fetched this run ===');
-        console.log(`  LinkedIn: ${results.linkedin.jobs.length} jobs (${results.linkedin.status})`);
-        console.log(`  Remote:   ${results.remote.jobs.length} jobs (${results.remote.status})`);
-      }
-      return exitCode;
-    }
-
-    console.log(`[Main] Combined ${allJobs.length} job(s) from all sources`);
-    stats = await processJobs(allJobs, config.maxJobsPerRun);
-
-    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    console.log('=== Job Alert Engine Summary ===');
-    console.log(`  Upwork:   ${results.upwork.jobs.length} fetched (${results.upwork.status})`);
-    console.log(`  LinkedIn: ${results.linkedin.jobs.length} fetched (${results.linkedin.status})`);
-    console.log(`  Processed: ${stats.processed}`);
-    console.log(`  Skipped:   ${stats.skipped} (duplicates)`);
-    console.log(`  Notified:  ${stats.notified} (new alerts)`);
-    console.log(`  Errors:    ${stats.errors}`);
-    console.log(`  Duration:  ${elapsed}s`);
-    console.log('=== Job Alert Engine Finished ===');
-
-    if (stats.errors > 0 && stats.notified === 0) {
-      exitCode = 1;
-    }
+    log.info('run finished', {
+      durationS: ((Date.now() - startedAt) / 1000).toFixed(1),
+      newJobs: ingestStats.new,
+      notified: fanoutStats.notificationsSent,
+    });
 
     return exitCode;
   } catch (error) {
     fatalError = error.message;
     exitCode = 1;
-    console.error(`[Fatal] ${error.message}`);
+    log.error('fatal', { error: error.message });
     if (error.stack) console.error(error.stack);
     return 1;
   } finally {
     if (firebaseReady) {
       try {
-        const durationSeconds = parseFloat(((Date.now() - startTime) / 1000).toFixed(1));
-        const report = buildCronReport({
-          results,
-          stats,
-          durationSeconds,
-          fatalError,
-          exitCode,
-        });
-        await saveCronRunReport(report);
+        await saveCronRunReport(
+          buildCronReport({
+            sourceReports,
+            ingestStats,
+            fanoutStats,
+            durationSeconds: Number(((Date.now() - startedAt) / 1000).toFixed(1)),
+            fatalError,
+            exitCode,
+          })
+        );
       } catch (error) {
-        console.error(`[CronReport] Failed to save status: ${error.message}`);
+        log.error('could not save run report', { error: error.message });
       }
     }
   }

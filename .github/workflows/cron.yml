@@ -1,12 +1,30 @@
-name: Job Alert Cron
+name: Job Alert Cron (manual / backup)
+
+# PRIMARY SCHEDULE LIVES ELSEWHERE.
+#
+# cron-job.org calls the Vercel function every 2 minutes:
+#   https://job-alert-system-two.vercel.app/api/run?key=<RUN_SECRET>
+# That is faster than GitHub can schedule (~5 min floor, and it throttles under
+# load) and runs closer to Firestore, so it is the real production trigger.
+#
+# The `schedule:` trigger here is intentionally DISABLED, for two reasons:
+#
+#  1. It is redundant — it would duplicate work the Vercel cron already does.
+#  2. COST ON A PRIVATE REPO. Public repos get unlimited Actions minutes;
+#     private repos get 2,000/month free. At every 5 minutes this workflow is
+#     ~8,600 runs/month x ~1.5-2 min, i.e. ~15,000 minutes — the free quota is
+#     gone in about four days and runs start failing.
+#
+# Keep it as a manual escape hatch: use "Run workflow" in the Actions tab to
+# force a cycle when Vercel is down or while debugging.
+#
+# To re-enable automatic runs (only if the Vercel cron is retired), uncomment
+# the schedule block below — and check your Actions minutes first.
 
 on:
-  schedule:
-    # GitHub Actions cannot reliably run faster than ~5 minutes (and it throttles
-    # under load), so this is the practical floor here. For true 1-2 minute
-    # checking, run the always-on poller instead:  cd backend && npm run poll
-    - cron: '*/5 * * * *'
   workflow_dispatch:
+  # schedule:
+  #   - cron: '*/5 * * * *'
 
 concurrency:
   group: job-alert-cron
@@ -32,13 +50,12 @@ jobs:
         working-directory: backend
         run: npm ci
 
-      # No Playwright/Chromium needed — LinkedIn is fetched with plain fetch + cheerio.
+      # No Playwright/Chromium needed — every source is plain fetch + cheerio.
 
       - name: Run job alert engine
         working-directory: backend
-        # Non-secret config (LinkedIn URL, keyword filter, etc.) comes from the
-        # committed backend/.env. Only the Firebase key is a GitHub Secret,
-        # because committing it to a public repo gets it auto-revoked by Google.
+        # Only the Firebase key is a secret. Everything else is either a code
+        # default or a Firestore setting (settings/ingest, settings/scoring).
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: npm start

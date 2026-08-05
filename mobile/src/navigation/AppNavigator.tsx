@@ -1,25 +1,36 @@
 import React from 'react';
 import { Text } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { AlertsScreen } from '../screens/AlertsScreen';
+import { FeedScreen } from '../screens/FeedScreen';
+import { SavedScreen } from '../screens/SavedScreen';
+import { PersonalizeScreen } from '../screens/PersonalizeScreen';
 import { SystemStatusScreen } from '../screens/SystemStatusScreen';
+import { colors } from '../theme';
 
 export type RootTabParamList = {
-  LinkedIn: undefined;
+  Feed: undefined;
+  Saved: undefined;
+  Personalize: undefined;
   Status: undefined;
 };
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
-function TabIcon({ label, focused }: { label: string; focused: boolean }) {
-  return (
-    <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.5 }}>{label}</Text>
-  );
+function TabIcon({ icon, focused }: { icon: string; focused: boolean }) {
+  return <Text style={{ fontSize: 19, opacity: focused ? 1 : 0.45 }}>{icon}</Text>;
 }
 
-// Platform-scoped wrapper. (Remote/Remotive removed — stale; Indeed not free.)
-const LinkedInScreen = () => <AlertsScreen platform="LinkedIn" />;
+/**
+ * Personalization lives in its OWN tab rather than as a settings sheet over the
+ * feed. Two reasons: the feed screen stays free of configuration chrome, and
+ * personalisation is a place the user genuinely returns to and refines, not a
+ * one-time setup step buried behind a gear icon.
+ */
+function FeedTab() {
+  const navigation = useNavigation<any>();
+  return <FeedScreen onOpenPersonalize={() => navigation.navigate('Personalize')} />;
+}
 
 export function AppNavigator() {
   return (
@@ -27,26 +38,39 @@ export function AppNavigator() {
       <Tab.Navigator
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: '#1A73E8',
-          tabBarInactiveTintColor: '#5F6368',
+          tabBarActiveTintColor: colors.primary,
+          tabBarInactiveTintColor: colors.textSubtle,
           tabBarStyle: {
-            borderTopColor: '#E8EAED',
+            backgroundColor: colors.surface,
+            borderTopColor: colors.border,
             paddingTop: 6,
-            height: 60,
+            height: 62,
           },
-          tabBarLabelStyle: {
-            fontSize: 12,
-            fontWeight: '600',
-            marginBottom: 6,
-          },
+          tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginBottom: 7 },
         }}
       >
         <Tab.Screen
-          name="LinkedIn"
-          component={LinkedInScreen}
+          name="Feed"
+          component={FeedTab}
           options={{
-            tabBarLabel: 'Jobs',
-            tabBarIcon: ({ focused }) => <TabIcon label="💼" focused={focused} />,
+            tabBarLabel: 'For you',
+            tabBarIcon: ({ focused }) => <TabIcon icon="🎯" focused={focused} />,
+          }}
+        />
+        <Tab.Screen
+          name="Saved"
+          component={SavedScreen}
+          options={{
+            tabBarLabel: 'Saved',
+            tabBarIcon: ({ focused }) => <TabIcon icon="⭐" focused={focused} />,
+          }}
+        />
+        <Tab.Screen
+          name="Personalize"
+          component={PersonalizeScreen}
+          options={{
+            tabBarLabel: 'Personalize',
+            tabBarIcon: ({ focused }) => <TabIcon icon="🎛️" focused={focused} />,
           }}
         />
         <Tab.Screen
@@ -54,7 +78,7 @@ export function AppNavigator() {
           component={SystemStatusScreen}
           options={{
             tabBarLabel: 'Status',
-            tabBarIcon: ({ focused }) => <TabIcon label="📊" focused={focused} />,
+            tabBarIcon: ({ focused }) => <TabIcon icon="📊" focused={focused} />,
           }}
         />
       </Tab.Navigator>

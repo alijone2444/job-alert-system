@@ -1,10 +1,19 @@
 {
+  "//": "NOTE: the system is designed to need NO composite indexes. Every query in backend/src/repositories/ uses a single order-by field (or an inequality on that same field), so Firestore's automatic single-field indexes cover it and the project deploys with no manual console step. The entries below are OPTIONAL performance indexes for the fan-out-on-READ scaling path described in ARCHITECTURE.md — create them only when that path is enabled. `npm run deploy:firebase` will attempt them and skip any it lacks IAM permission for.",
   "indexes": [
     {
+      "//": "Ingest freshness window: where(postedAt >= cutoff).orderBy(postedAt desc). Single field — automatic.",
+      "collectionGroup": "jobs",
+      "queryScope": "COLLECTION",
+      "fields": [{ "fieldPath": "postedAt", "order": "DESCENDING" }]
+    },
+    {
+      "//": "REQUIRED ONLY FOR the fan-out-on-READ scaling path: tag filter + freshness.",
       "collectionGroup": "jobs",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        { "fieldPath": "tags", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "postedAt", "order": "DESCENDING" }
       ]
     }
   ],

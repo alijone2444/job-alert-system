@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "poll": "node src/poll.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "deploy:firebase": "node scripts/deploy-firebase.mjs"
   },
   "engines": {
     "node": ">=18.0.0"

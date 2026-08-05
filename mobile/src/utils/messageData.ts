@@ -1,20 +1,31 @@
-import { RemoteMessageData } from '../types/job';
+import { RemoteMessageData } from '../types';
 
+/**
+ * FCM delivers `data` as a flat map of strings. Parsing it in one place means a
+ * renamed backend field breaks here, loudly, instead of silently producing
+ * `undefined` at three different call sites.
+ */
 export function parseRemoteMessageData(
   data: Record<string, unknown> | undefined
 ): RemoteMessageData {
   if (!data) return {};
+  const read = (key: string) => (data[key] != null ? String(data[key]) : undefined);
 
   return {
-    jobId: typeof data.jobId === 'string' ? data.jobId : undefined,
-    platform: typeof data.platform === 'string' ? data.platform : undefined,
-    title: typeof data.title === 'string' ? data.title : undefined,
-    link: typeof data.link === 'string' ? data.link : undefined,
-    company: typeof data.company === 'string' ? data.company : undefined,
-    location: typeof data.location === 'string' ? data.location : undefined,
+    type: read('type'),
+    jobKey: read('jobKey'),
+    score: read('score'),
+    title: read('title'),
+    company: read('company'),
+    location: read('location'),
+    source: read('source'),
+    applyUrl: read('applyUrl'),
+    count: read('count'),
   };
 }
 
+/** The ORIGINAL posting URL carried by a job notification. */
 export function getMessageLink(data: Record<string, unknown> | undefined): string | undefined {
-  return parseRemoteMessageData(data).link;
+  const parsed = parseRemoteMessageData(data);
+  return parsed.applyUrl && /^https?:\/\//i.test(parsed.applyUrl) ? parsed.applyUrl : undefined;
 }

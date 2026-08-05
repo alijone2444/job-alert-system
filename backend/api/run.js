@@ -1,14 +1,25 @@
-// Vercel serverless endpoint: runs ONE fetch -> dedup -> notify cycle.
-// An external cron (e.g. cron-job.org, free) hits this URL every 1-2 min:
-//   https://<your-vercel-app>.vercel.app/api/run?key=YOUR_RUN_SECRET
-//
-// Env vars to set in Vercel (Project Settings -> Environment Variables):
-//   FIREBASE_SERVICE_ACCOUNT  = the service-account JSON (one line)
-//   LINKEDIN_SEARCH_URL       = your LinkedIn keyword search URL
-//   KEYWORD_FILTER            = the dev-role title filter
-//   UPWORK_ENABLED            = false
-//   RUN_SECRET                = any random string (so only you can trigger it)
+/**
+ * GET /api/run — one full ingest -> score -> notify cycle.
+ *
+ * This is the endpoint cron-job.org has been hitting every 2 minutes. Its URL,
+ * its auth (`?key=<RUN_SECRET>`) and its response shape are UNCHANGED — the
+ * existing schedule keeps working with no reconfiguration. What changed is
+ * everything behind it: it now runs a multi-source pipeline and personalises
+ * per user instead of fetching LinkedIn and broadcasting to everyone.
+ *
+ * Env vars (Vercel -> Project Settings -> Environment Variables):
+ *   FIREBASE_SERVICE_ACCOUNT   service-account JSON, one line   (required)
+ *   RUN_SECRET                 guards this endpoint             (recommended)
+ *   APP_API_KEY                guards the app-facing endpoints  (recommended)
+ *   DISABLED_SOURCES           e.g. "remoteok,ashby"            (optional)
+ *   GREENHOUSE_BOARDS / LEVER_BOARDS / ASHBY_BOARDS             (optional)
+ *   SCRAPER_PROXY_URL          enables Rozee.pk                 (optional)
+ */
+
 import { runEngine } from '../src/engine.js';
+
+/** The pipeline is budgeted to finish well inside this ceiling. */
+export const config = { maxDuration: 60 };
 
 export default async function handler(req, res) {
   const secret = process.env.RUN_SECRET;

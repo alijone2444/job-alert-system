@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import { Alert, Linking, StatusBar } from 'react-native';
+import { Alert, StatusBar } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppProvider } from './src/context/AppContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
@@ -10,45 +10,48 @@ import {
   getInitialNotification,
   subscribeToTokenRefresh,
 } from './src/services/notifications';
-import { getMessageLink, parseRemoteMessageData } from './src/utils/messageData';
-import { addViewed } from './src/services/viewedJobs';
+import { parseRemoteMessageData } from './src/utils/messageData';
+import { applyToJob } from './src/services/interactions';
+import { colors } from './src/theme';
 import { logger } from './src/utils/logger';
 
 export default function App() {
   const [deviceId, setDeviceId] = useState<string | null>(null);
 
-  const handleNotificationTap = useCallback((data: Record<string, unknown> | undefined) => {
-    // Opening a job from its notification should also mark it viewed.
-    const jobId = parseRemoteMessageData(data).jobId;
-    if (jobId) addViewed(jobId);
+  /**
+   * Tapping a job notification opens the ORIGINAL posting and records the tap
+   * as an apply — the notification IS the apply button, so the two must not
+   * diverge from what the in-app card does.
+   */
+  const handleNotificationTap = useCallback(
+    (data: Record<string, unknown> | undefined, userId: string | null) => {
+      const parsed = parseRemoteMessageData(data);
+      if (!parsed.applyUrl || !userId || !parsed.jobKey) return;
 
-    const link = getMessageLink(data);
-    if (link) {
-      logger.info('App', `Opening job link: ${link}`);
-      Linking.openURL(link).catch(() => {
-        Alert.alert('Error', 'Could not open the job link.');
-      });
-    }
-  }, []);
+      logger.info('App', `Opening job from notification: ${parsed.title ?? parsed.jobKey}`);
+      applyToJob(userId, parsed.jobKey, parsed.applyUrl);
+    },
+    []
+  );
 
   useEffect(() => {
     logger.divider('App');
     logger.info('App', 'Job Alert app started');
 
     let tokenRefreshUnsub: (() => void) | undefined;
+    let currentDeviceId: string | null = null;
 
     async function init() {
       const result = await setupPushNotifications();
+      currentDeviceId = result.deviceId;
       setDeviceId(result.deviceId);
 
       if (!result.permissionGranted) {
         logger.warn('App', 'Notifications disabled by user');
         Alert.alert(
-          'Notifications Disabled',
-          'Enable push notifications in your device settings to receive instant job alerts.'
+          'Notifications off',
+          'Enable notifications in your device settings to be alerted the moment a strong match is posted.'
         );
-      } else {
-        logger.success('App', 'Push notifications ready');
       }
 
       if (result.deviceId) {
@@ -57,29 +60,25 @@ export default function App() {
         });
       }
 
+      // Cold start from a notification tap.
       const initial = await getInitialNotification();
-      if (initial?.data) {
-        handleNotificationTap(initial.data);
-      }
+      if (initial?.data) handleNotificationTap(initial.data, result.deviceId);
     }
 
     init();
 
-    // New jobs arrive silently in the foreground (no interrupting popup) — the
-    // list updates in real-time, and tray notifications still show when the app
-    // is in the background or closed.
+    // Foreground pushes are intentionally silent — the feed listener already
+    // inserts the card live, so a popup would interrupt the user to tell them
+    // about something already on their screen.
     const foregroundUnsub = onForegroundMessage((message) => {
-      logger.info('App', `New job (foreground, no popup): ${message.notification?.title ?? ''}`);
+      logger.info('App', `Match arrived in foreground: ${message.notification?.title ?? ''}`);
     });
 
     const openedUnsub = onNotificationOpened((message) => {
-      if (message.data) {
-        handleNotificationTap(message.data);
-      }
+      if (message.data) handleNotificationTap(message.data, currentDeviceId);
     });
 
     return () => {
-      logger.info('App', 'Cleaning up listeners');
       foregroundUnsub();
       openedUnsub();
       tokenRefreshUnsub?.();
@@ -88,7 +87,7 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar barStyle="light-content" backgroundColor="#1A73E8" />
+      <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
       <AppProvider deviceId={deviceId}>
         <AppNavigator />
       </AppProvider>

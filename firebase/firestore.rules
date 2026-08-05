@@ -1,28 +1,75 @@
 rules_version = '2';
 
+/**
+ * Firestore security rules.
+ *
+ * THE MODEL: there is no user authentication yet — a "user" is a device id, so
+ * these rules cannot verify identity. What they CAN do, and now do, is enforce
+ * who is allowed to WRITE each collection. The backend uses the Admin SDK,
+ * which bypasses rules entirely, so anything only the backend should produce is
+ * read-only here. That is what stops a client from inventing its own match
+ * scores or fabricating job documents.
+ *
+ * When Firebase Auth lands, `if true` becomes
+ * `if request.auth != null && request.auth.uid == userId`, and the structure
+ * below is already partitioned per user for exactly that change.
+ */
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Device tokens — mobile app can read/write its own doc
-    match /users/{deviceId} {
+    match /users/{userId} {
+      // Device registration + FCM token. The app writes this directly as a
+      // fallback when /api/register is unreachable, so push never depends on a
+      // cold serverless function.
       allow read, write: if true;
+
+      // Preferences. Normally written through /api/preferences (which also
+      // rebuilds the feed); direct writes stay allowed so the settings screen
+      // degrades rather than breaks when the API is down.
+      match /settings/{docId} {
+        allow read, write: if true;
+      }
+
+      // The personalised feed. READ-ONLY: entries carry match scores computed
+      // by the recommendation engine, and a client able to write them could
+      // put anything at the top of its own feed.
+      match /feed/{jobKey} {
+        allow read: if true;
+        allow write: if false;
+      }
+
+      // Saved / hidden / applied. READ-ONLY: writes go through
+      // /api/interactions so state transitions stay consistent.
+      match /interactions/{jobKey} {
+        allow read: if true;
+        allow write: if false;
+      }
     }
 
-    // Job history — mobile app reads; only Admin SDK (backend) writes
-    match /jobs/{jobId} {
+    // The shared, deduplicated job pool — written only by the ingest pipeline.
+    match /jobs/{jobKey} {
       allow read: if true;
       allow write: if false;
     }
 
-    // Backend cron run report — mobile reads; only Admin SDK writes
+    // Per-source health, for the Status screen.
+    match /sources/{sourceId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Latest cron run report.
     match /cron_status/{docId} {
       allow read: if true;
       allow write: if false;
     }
 
-    // App-controlled filter settings (which country to fetch) — app reads/writes
+    // System settings: scoring weights and ingest tuning. Readable so the app
+    // can show defaults; NOT client-writable — these govern every user's feed,
+    // and one device must not be able to retune the recommender for everyone.
     match /settings/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if false;
     }
   }
 }

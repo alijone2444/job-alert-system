@@ -1,53 +1,51 @@
+/**
+ * Run telemetry, persisted to `cron_status/latest` for the app's Status screen.
+ *
+ * The report is now SOURCE-ARRAY shaped rather than having a hard-coded field
+ * per board — adding a source must not require a schema change here or a new
+ * release of the app. The old `linkedin` / `upwork` keys are still emitted so
+ * an older installed APK keeps rendering instead of crashing.
+ */
+
 import admin from 'firebase-admin';
 import { getFirestore } from '../firebase/admin.js';
+import { createLogger } from '../core/logger.js';
 
+const log = createLogger('CronReport');
 const CRON_STATUS_DOC = 'cron_status/latest';
 
 /**
- * Persist the latest backend/cron run report so the mobile app can verify
- * Upwork, LinkedIn, and GitHub Actions health.
- */
-export async function saveCronRunReport(report) {
-  const db = getFirestore();
-
-  const payload = {
-    ...report,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  };
-
-  await db.doc(CRON_STATUS_DOC).set(payload, { merge: false });
-
-  console.log('[CronReport] Saved run status to Firestore cron_status/latest');
-  console.log('[CronReport] Upwork:', report.upwork.jobsFetched, 'jobs —', report.upwork.status);
-  console.log('[CronReport] LinkedIn:', report.linkedin.jobsFetched, 'jobs —', report.linkedin.status);
-  console.log('[CronReport] Overall status:', report.status);
-}
-
-/**
- * Build a cron report object from run results.
+ * @param {Object} input
+ * @param {Object[]} input.sourceReports  from the ingest pipeline
+ * @param {Object}   input.ingestStats
+ * @param {Object}   input.fanoutStats
+ * @param {number}   input.durationSeconds
+ * @param {string|null} input.fatalError
+ * @param {number}   input.exitCode
  */
 export function buildCronReport({
-  results,
-  stats,
-  durationSeconds,
+  sourceReports = [],
+  ingestStats = {},
+  fanoutStats = {},
+  durationSeconds = 0,
   fatalError = null,
   exitCode = 0,
 }) {
-  const upworkError = results.upwork.error ?? null;
-  const linkedinError = results.linkedin.error ?? null;
+  const errored = sourceReports.filter((report) => report.status === 'error');
+  const ok = sourceReports.filter((report) => report.status === 'ok');
 
   let status = 'success';
-  if (fatalError) {
-    status = 'failed';
-  } else if (results.upwork.status === 'error' && results.linkedin.status === 'error') {
-    status = 'failed';
-  } else if (results.upwork.status === 'error' || results.linkedin.status === 'error') {
-    status = 'partial';
-  } else if (stats?.errors > 0) {
-    status = 'partial';
-  }
+  if (fatalError) status = 'failed';
+  else if (!ok.length && errored.length) status = 'failed';
+  else if (errored.length) status = 'partial';
 
-  const runSource = process.env.GITHUB_ACTIONS === 'true' ? 'github-actions' : 'local';
+  const runSource = process.env.VERCEL
+    ? 'vercel'
+    : process.env.GITHUB_ACTIONS === 'true'
+      ? 'github-actions'
+      : 'local';
+
+  const linkedinReport = sourceReports.find((report) => report.sourceId === 'linkedin');
 
   return {
     lastRunAt: new Date().toISOString(),
@@ -56,31 +54,57 @@ export function buildCronReport({
     runSource,
     durationSeconds,
     fatalError,
-    upwork: {
-      status: results.upwork.status,
-      jobsFetched: results.upwork.jobs.length,
-      error: upworkError,
-      sampleJobs: results.upwork.jobs.slice(0, 3).map((job) => ({
-        title: job.title,
-        link: job.link,
-        platform: job.platform,
-      })),
+
+    sources: sourceReports.map((report) => ({
+      sourceId: report.sourceId,
+      status: report.status,
+      jobsFetched: report.jobs ?? 0,
+      rejected: report.rejected ?? 0,
+      error: report.error ?? null,
+      durationMs: report.durationMs ?? 0,
+    })),
+
+    ingest: {
+      fetched: ingestStats.fetched ?? 0,
+      duplicatesRemoved: ingestStats.duplicatesRemoved ?? 0,
+      newJobs: ingestStats.new ?? 0,
+      updatedJobs: ingestStats.updated ?? 0,
+      enriched: ingestStats.enriched ?? 0,
     },
+
+    personalization: {
+      users: fanoutStats.users ?? 0,
+      feedEntriesWritten: fanoutStats.entriesWritten ?? 0,
+      notificationsSent: fanoutStats.notificationsSent ?? 0,
+      usersNotified: fanoutStats.usersNotified ?? 0,
+      feedRebuilds: fanoutStats.rebuilds ?? 0,
+    },
+
+    // --- legacy keys: keep older installed APKs rendering ---------------
     linkedin: {
-      status: results.linkedin.status,
-      jobsFetched: results.linkedin.jobs.length,
-      error: linkedinError,
-      sampleJobs: results.linkedin.jobs.slice(0, 3).map((job) => ({
-        title: job.title,
-        link: job.link,
-        platform: job.platform,
-      })),
+      status: linkedinReport?.status ?? 'disabled',
+      jobsFetched: linkedinReport?.jobs ?? 0,
+      error: linkedinReport?.error ?? null,
+      sampleJobs: [],
     },
-    processing: stats ?? {
-      processed: 0,
-      skipped: 0,
-      notified: 0,
-      errors: 0,
+    upwork: { status: 'disabled', jobsFetched: 0, error: null, sampleJobs: [] },
+    processing: {
+      processed: ingestStats.fetched ?? 0,
+      skipped: ingestStats.duplicatesRemoved ?? 0,
+      notified: fanoutStats.notificationsSent ?? 0,
+      errors: errored.length,
     },
   };
+}
+
+export async function saveCronRunReport(report) {
+  await getFirestore()
+    .doc(CRON_STATUS_DOC)
+    .set({ ...report, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: false });
+
+  log.info('run report saved', {
+    status: report.status,
+    newJobs: report.ingest.newJobs,
+    notified: report.personalization.notificationsSent,
+  });
 }

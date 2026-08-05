@@ -33,10 +33,52 @@ function preferencesRef(userId) {
   return userRef(userId).collection('settings').doc('preferences');
 }
 
-/** All registered devices/users. Small collection today; paginate when it isn't. */
-export async function listUsers({ limit = 500 } = {}) {
+/** Device-shaped ids from before accounts existed. Mirrors apiKit's pattern. */
+const LEGACY_DEVICE_ID = /^(android|ios)_[A-Za-z0-9_-]+$/;
+
+/** A pre-auth profile is dead once it has been inactive for this long. */
+const STALE_DEVICE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Firestore may return either our ISO string or a Timestamp from older data. */
+function timestampToMs(value) {
+  if (!value) return 0;
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isActiveUser(user, cutoff) {
+  if (user.claimedBy) return false;
+  if (!LEGACY_DEVICE_ID.test(user.userId)) return true; // a real account
+  return timestampToMs(user.lastSeenAt) >= cutoff;
+}
+
+/**
+ * Users the pipeline should actually serve.
+ *
+ * TWO CLASSES OF DEAD PROFILE are filtered out here, and both caused real
+ * problems:
+ *
+ *  1. CLAIMED devices. After sign-in, /api/claim copies a device profile into
+ *     the account and tombstones it. If it kept being fanned out to, the same
+ *     phone would be scored twice and receive DUPLICATE notifications — one
+ *     for the account and one for its own former device id.
+ *
+ *  2. ABANDONED devices. Old installs leave behind profiles that will never be
+ *     claimed. Scoring them burns reads and writes from a 50,000/day budget on
+ *     feeds nobody will ever open.
+ *
+ * Accounts (uid-shaped ids) are NEVER filtered — only pre-auth device profiles
+ * can go stale, and only after a week of silence.
+ */
+export async function listUsers({ limit = 500, includeInactive = false } = {}) {
   const snapshot = await getFirestore().collection(USERS).limit(limit).get();
-  return snapshot.docs.map((doc) => ({ userId: doc.id, ...doc.data() }));
+  const users = snapshot.docs.map((doc) => ({ userId: doc.id, ...doc.data() }));
+  if (includeInactive) return users;
+
+  const cutoff = Date.now() - STALE_DEVICE_MS;
+
+  return users.filter((user) => isActiveUser(user, cutoff));
 }
 
 /** @returns {Promise<Object|null>} */
@@ -120,9 +162,13 @@ export async function markScored(userId, prefsVersion) {
 export async function getTokensByUser() {
   const snapshot = await getFirestore().collection(USERS).get();
   const tokens = new Map();
+  const cutoff = Date.now() - STALE_DEVICE_MS;
 
   snapshot.forEach((doc) => {
-    const token = doc.data()?.fcmToken;
+    const user = { userId: doc.id, ...doc.data() };
+    if (!isActiveUser(user, cutoff)) return;
+
+    const token = user.fcmToken;
     if (typeof token === 'string' && token.length > 20) tokens.set(doc.id, token);
   });
 

@@ -36,7 +36,7 @@ class MainApplication : Application(), ReactApplication {
         "Job Alerts",
         NotificationManager.IMPORTANCE_HIGH
       ).apply {
-        description = "Instant notifications for new Upwork and LinkedIn jobs"
+        description = "Personalized job-match notifications"
         enableVibration(true)
       }
 

@@ -82,6 +82,14 @@ export const DEFAULT_TUNING = {
   },
 };
 
+/**
+ * A notification interrupts someone's day, so it has a HARD FLOOR, not just a
+ * default. Nothing below this may ever trigger a push, whatever a client sends
+ * — `sanitizePreferences` clamps to it. The feed is where borderline matches
+ * belong; the notification tray is not.
+ */
+export const MIN_NOTIFY_THRESHOLD = 85;
+
 /** Feed/notification cut-offs when a user has not chosen their own. */
 export const DEFAULT_THRESHOLDS = {
   /**
@@ -90,8 +98,8 @@ export const DEFAULT_THRESHOLDS = {
    * The app exposes this as a slider — raise it once the pool is warm.
    */
   feed: 70,
-  /** Push notifications interrupt the user, so the bar is higher. */
-  notify: 82,
+  /** Push notifications interrupt, so the bar is much higher. See above. */
+  notify: MIN_NOTIFY_THRESHOLD,
 };
 
 /**

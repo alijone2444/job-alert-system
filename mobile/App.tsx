@@ -1,8 +1,9 @@
-import React, { useEffect, useCallback, useState } from 'react';
-import { Alert, StatusBar } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { AppProvider } from './src/context/AppContext';
+import { AppProvider, useAppContext } from './src/context/AppContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { SignInScreen } from './src/screens/SignInScreen';
 import {
   setupPushNotifications,
   onForegroundMessage,
@@ -12,39 +13,41 @@ import {
 } from './src/services/notifications';
 import { parseRemoteMessageData } from './src/utils/messageData';
 import { applyToJob } from './src/services/interactions';
+import { claimDeviceData } from './src/services/device';
 import { colors } from './src/theme';
 import { logger } from './src/utils/logger';
 
-export default function App() {
-  const [deviceId, setDeviceId] = useState<string | null>(null);
+/**
+ * Everything below the sign-in gate.
+ *
+ * Push setup is deliberately deferred until AFTER sign-in: the FCM token must
+ * be stored against the account, not the handset. Registering it earlier would
+ * key notifications to a device id the backend no longer uses.
+ */
+function AuthedApp() {
+  const { userId } = useAppContext();
+  const [ready, setReady] = useState(false);
 
-  /**
-   * Tapping a job notification opens the ORIGINAL posting and records the tap
-   * as an apply — the notification IS the apply button, so the two must not
-   * diverge from what the in-app card does.
-   */
   const handleNotificationTap = useCallback(
-    (data: Record<string, unknown> | undefined, userId: string | null) => {
+    (data: Record<string, unknown> | undefined, uid: string | null) => {
       const parsed = parseRemoteMessageData(data);
-      if (!parsed.applyUrl || !userId || !parsed.jobKey) return;
+      if (!parsed.applyUrl || !uid || !parsed.jobKey) return;
 
       logger.info('App', `Opening job from notification: ${parsed.title ?? parsed.jobKey}`);
-      applyToJob(userId, parsed.jobKey, parsed.applyUrl);
+      applyToJob(uid, parsed.jobKey, parsed.applyUrl);
     },
     []
   );
 
   useEffect(() => {
-    logger.divider('App');
-    logger.info('App', 'Job Alert app started');
+    if (!userId) return;
 
     let tokenRefreshUnsub: (() => void) | undefined;
-    let currentDeviceId: string | null = null;
+    let cancelled = false;
 
     async function init() {
-      const result = await setupPushNotifications();
-      currentDeviceId = result.deviceId;
-      setDeviceId(result.deviceId);
+      const result = await setupPushNotifications(userId!);
+      if (cancelled) return;
 
       if (!result.permissionGranted) {
         logger.warn('App', 'Notifications disabled by user');
@@ -54,42 +57,72 @@ export default function App() {
         );
       }
 
-      if (result.deviceId) {
-        tokenRefreshUnsub = subscribeToTokenRefresh(result.deviceId, (token) => {
-          logger.info('App', `Token refreshed: ${token.slice(0, 12)}…`);
-        });
-      }
+      // Pull anything this handset collected before accounts existed into the
+      // signed-in profile. No-ops after the first successful run.
+      if (result.deviceId) await claimDeviceData(result.deviceId);
 
-      // Cold start from a notification tap.
+      tokenRefreshUnsub = subscribeToTokenRefresh(userId!, (token) => {
+        logger.info('App', `Token refreshed: ${token.slice(0, 12)}…`);
+      });
+
       const initial = await getInitialNotification();
-      if (initial?.data) handleNotificationTap(initial.data, result.deviceId);
+      if (initial?.data) handleNotificationTap(initial.data, userId);
+
+      setReady(true);
     }
 
     init();
 
-    // Foreground pushes are intentionally silent — the feed listener already
-    // inserts the card live, so a popup would interrupt the user to tell them
-    // about something already on their screen.
+    // Foreground pushes stay silent — the feed listener already inserts the
+    // card live, so a popup would interrupt to announce something on screen.
     const foregroundUnsub = onForegroundMessage((message) => {
       logger.info('App', `Match arrived in foreground: ${message.notification?.title ?? ''}`);
     });
 
     const openedUnsub = onNotificationOpened((message) => {
-      if (message.data) handleNotificationTap(message.data, currentDeviceId);
+      if (message.data) handleNotificationTap(message.data, userId);
     });
 
     return () => {
+      cancelled = true;
       foregroundUnsub();
       openedUnsub();
       tokenRefreshUnsub?.();
     };
-  }, [handleNotificationTap]);
+  }, [userId, handleNotificationTap]);
+
+  // The navigator mounts immediately; `ready` only gates nothing visible today
+  // but keeps the init promise observable for future splash work.
+  void ready;
+
+  return <AppNavigator />;
+}
+
+function Gate() {
+  const { userId, initializing } = useAppContext();
+
+  if (initializing) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  return userId ? <AuthedApp /> : <SignInScreen />;
+}
+
+export default function App() {
+  useEffect(() => {
+    logger.divider('App');
+    logger.info('App', 'Job Alert started');
+  }, []);
 
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" backgroundColor={colors.background} />
-      <AppProvider deviceId={deviceId}>
-        <AppNavigator />
+      <AppProvider>
+        <Gate />
       </AppProvider>
     </SafeAreaProvider>
   );

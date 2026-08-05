@@ -12,7 +12,28 @@
           "package_name": "com.jobalert"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "945236544179-2ss93j20t3p1mhos7svgec8d4c4ikfh7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.jobalert",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "945236544179-os0ish54vue10gridnfjj3o0pg9ulvtv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.jobalert",
+            "certificate_hash": "ccaa67e8efc173f2ebd1eae5001bbabc2e13776b"
+          }
+        },
+        {
+          "client_id": "945236544179-d9oq8c7hrq8u9lb5jm455rt04tdvpoui.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDuxd29eH0x-1NbU6ABNUo1ASnEXPWPF5E"
@@ -20,7 +41,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "945236544179-d9oq8c7hrq8u9lb5jm455rt04tdvpoui.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

@@ -1,8 +1,11 @@
 {
   "extends": "@react-native/typescript-config",
   "compilerOptions": {
-    "types": ["jest"]
+    "types": ["jest"],
+    // src/config/googleServices.ts reads the web client id straight out of
+    // google-services.json so it can never drift from what the native SDK uses.
+    "resolveJsonModule": true
   },
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": ["**/*.ts", "**/*.tsx", "android/app/google-services.json"],
   "exclude": ["**/node_modules", "**/Pods"]
 }

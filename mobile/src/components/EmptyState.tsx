@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Icon, IconName } from './Icon';
 import { colors, radius, spacing } from '../theme';
 
 type Props = {
-  icon: string;
+  icon: IconName;
   title: string;
   message: string;
   action?: { label: string; onPress: () => void };
@@ -19,7 +20,9 @@ type Props = {
 export function EmptyState({ icon, title, message, action }: Props) {
   return (
     <View style={styles.container}>
-      <Text style={styles.icon}>{icon}</Text>
+      <View style={styles.iconWrap}>
+        <Icon name={icon} size={30} color={colors.textSubtle} weight={1.7} />
+      </View>
       <Text style={styles.title}>{title}</Text>
       <Text style={styles.message}>{message}</Text>
       {action ? (
@@ -33,7 +36,15 @@ export function EmptyState({ icon, title, message, action }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xxl },
-  icon: { fontSize: 40, marginBottom: spacing.md },
+  iconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
   title: { fontSize: 16, fontWeight: '700', color: colors.text, marginBottom: spacing.sm },
   message: {
     fontSize: 13,

@@ -31,7 +31,7 @@ import { colors, matchTone, radius, spacing } from '../theme';
  * of rebuilds while the user is still deciding.
  */
 export function PersonalizeScreen() {
-  const { deviceId } = useAppContext();
+  const { userId, user, signOut } = useAppContext();
   const {
     draft,
     taxonomy,
@@ -44,7 +44,7 @@ export function PersonalizeScreen() {
     clear,
     save,
     reset,
-  } = usePreferences(deviceId);
+  } = usePreferences(userId);
 
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
 
@@ -92,6 +92,40 @@ export function PersonalizeScreen() {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
+        {/* ---------------------------- ACCOUNT --------------------------- */}
+        <SectionCard title="Account">
+          <View style={styles.accountRow}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {(user?.displayName || user?.email || '?').charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.accountText}>
+              <Text style={styles.accountName} numberOfLines={1}>
+                {user?.displayName || 'Signed in'}
+              </Text>
+              <Text style={styles.accountEmail} numberOfLines={1}>
+                {user?.email || userId}
+              </Text>
+            </View>
+            <TouchableOpacity
+              onPress={() =>
+                Alert.alert('Sign out?', 'Your preferences and saved jobs stay on your account.', [
+                  { text: 'Cancel', style: 'cancel' },
+                  { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
+                ])
+              }
+              style={styles.signOutButton}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.signOutText}>Sign out</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.hint}>
+            Everything below is tied to this account, so it follows you to a new phone.
+          </Text>
+        </SectionCard>
+
         {/* ---------------------------- SKILLS ---------------------------- */}
         <SectionCard
           title="Skills"
@@ -313,8 +347,10 @@ export function PersonalizeScreen() {
                 </Text>
               </View>
             </View>
+            {/* 85 is a hard floor enforced by the backend, not just a default —
+                a weak match must never be allowed to interrupt you. */}
             <View style={styles.chipRow}>
-              {[70, 80, 85, 90, 95].map((value) => (
+              {[85, 90, 95].map((value) => (
                 <Chip
                   key={value}
                   size="sm"
@@ -324,6 +360,9 @@ export function PersonalizeScreen() {
                 />
               ))}
             </View>
+            <Text style={styles.hint}>
+              Anything below 85% stays in your feed and never sends a notification.
+            </Text>
 
             <View style={styles.switchRow}>
               <View style={styles.switchText}>
@@ -405,6 +444,28 @@ const styles = StyleSheet.create({
   salaryField: { flex: 1 },
 
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+
+  accountRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { fontSize: 17, fontWeight: '800', color: colors.primary },
+  accountText: { flex: 1 },
+  accountName: { fontSize: 14, fontWeight: '700', color: colors.text },
+  accountEmail: { fontSize: 12, color: colors.textSubtle, marginTop: 1 },
+  signOutButton: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 7,
+  },
+  signOutText: { fontSize: 12, fontWeight: '700', color: colors.textMuted },
 
   divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.lg },
 

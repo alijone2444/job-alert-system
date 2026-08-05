@@ -26,7 +26,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   keywordsExclude: [],
   strictCountry: false,
   feedThreshold: 70,
-  notifyThreshold: 82,
+  // Hard floor, enforced server-side too — see backend MIN_NOTIFY_THRESHOLD.
+  notifyThreshold: 85,
   notificationsEnabled: true,
   version: 0,
   updatedAt: '',

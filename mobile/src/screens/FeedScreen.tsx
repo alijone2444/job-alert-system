@@ -32,8 +32,8 @@ type Props = { onOpenPersonalize: () => void };
  * narrowing: search, source, and a minimum-match slider.
  */
 export function FeedScreen({ onOpenPersonalize }: Props) {
-  const { deviceId } = useAppContext();
-  const { items, loading, refreshing, error, refresh } = useFeed(deviceId);
+  const { userId } = useAppContext();
+  const { items, loading, refreshing, error, refresh } = useFeed(userId);
 
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
@@ -60,27 +60,27 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
 
   const handleApply = useCallback(
     (job: FeedItem) => {
-      if (!deviceId) return;
-      applyToJob(deviceId, job.jobKey, job.applyUrl);
+      if (!userId) return;
+      applyToJob(userId, job.jobKey, job.applyUrl);
     },
-    [deviceId]
+    [userId]
   );
 
   const handleToggleSave = useCallback(
     (job: FeedItem) => {
-      if (!deviceId) return;
-      const action = job.isSaved ? unsaveJob(deviceId, job.jobKey) : saveJob(deviceId, job);
+      if (!userId) return;
+      const action = job.isSaved ? unsaveJob(userId, job.jobKey) : saveJob(userId, job);
       action.catch((err) => logger.warn('Feed', `Save failed: ${err.message}`));
     },
-    [deviceId]
+    [userId]
   );
 
   const handleHide = useCallback(
     (job: FeedItem) => {
-      if (!deviceId) return;
-      hideJob(deviceId, job).catch((err) => logger.warn('Feed', `Hide failed: ${err.message}`));
+      if (!userId) return;
+      hideJob(userId, job).catch((err) => logger.warn('Feed', `Hide failed: ${err.message}`));
     },
-    [deviceId]
+    [userId]
   );
 
   if (loading && items.length === 0) {
@@ -180,7 +180,7 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
         ListEmptyComponent={
           items.length === 0 ? (
             <EmptyState
-              icon="🎯"
+              icon="target"
               title="No matches yet"
               message={
                 'Pick your skills, countries and job types in the Personalize tab — new jobs are checked every 2 minutes and only strong matches land here.'
@@ -189,7 +189,7 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
             />
           ) : (
             <EmptyState
-              icon="🔍"
+              icon="search"
               title="Nothing matches these filters"
               message={`${items.length} job${items.length === 1 ? '' : 's'} in your feed, but none pass the current search or minimum match.`}
               action={{

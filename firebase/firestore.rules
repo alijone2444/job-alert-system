@@ -3,50 +3,72 @@ rules_version = '2';
 /**
  * Firestore security rules.
  *
- * THE MODEL: there is no user authentication yet — a "user" is a device id, so
- * these rules cannot verify identity. What they CAN do, and now do, is enforce
- * who is allowed to WRITE each collection. The backend uses the Admin SDK,
- * which bypasses rules entirely, so anything only the backend should produce is
- * read-only here. That is what stops a client from inventing its own match
- * scores or fabricating job documents.
+ * Now that Google Sign-In is in place, these enforce real per-user isolation:
+ * a document under `users/{uid}` is readable and writable only by the holder of
+ * a valid Firebase ID token for that uid. Before accounts existed the best
+ * these rules could do was restrict WHAT could be written; now they restrict
+ * WHO.
  *
- * When Firebase Auth lands, `if true` becomes
- * `if request.auth != null && request.auth.uid == userId`, and the structure
- * below is already partitioned per user for exactly that change.
+ * The backend uses the Admin SDK, which bypasses rules entirely — so anything
+ * only the backend should produce is read-only here regardless of identity.
  */
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function signedInAs(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    /**
+     * Installs that predate sign-in are keyed by a device id
+     * ("android_<installId>"). They keep limited access until they sign in and
+     * POST /api/claim adopts their data, after which the profile is tombstoned.
+     *
+     * A Firebase uid is a 28-character opaque string and never matches this
+     * pattern, so no account is ever reachable through this path.
+     *
+     * REMOVE THIS once every install has migrated — and set
+     * ALLOW_LEGACY_DEVICE_AUTH=false on the backend at the same time.
+     */
+    function isLegacyDeviceId(userId) {
+      return userId.matches('^(android|ios)_[A-Za-z0-9_-]+$');
+    }
+
+    function mayAccess(userId) {
+      return signedInAs(userId) || isLegacyDeviceId(userId);
+    }
+
     match /users/{userId} {
-      // Device registration + FCM token. The app writes this directly as a
-      // fallback when /api/register is unreachable, so push never depends on a
-      // cold serverless function.
-      allow read, write: if true;
+      // Account record + FCM token. The app writes this directly as a fallback
+      // when /api/register is unreachable, so push never depends on a cold
+      // serverless function.
+      allow read, write: if mayAccess(userId);
 
       // Preferences. Normally written through /api/preferences (which also
       // rebuilds the feed); direct writes stay allowed so the settings screen
       // degrades rather than breaks when the API is down.
       match /settings/{docId} {
-        allow read, write: if true;
+        allow read, write: if mayAccess(userId);
       }
 
       // The personalised feed. READ-ONLY: entries carry match scores computed
       // by the recommendation engine, and a client able to write them could
       // put anything at the top of its own feed.
       match /feed/{jobKey} {
-        allow read: if true;
+        allow read: if mayAccess(userId);
         allow write: if false;
       }
 
       // Saved / hidden / applied. READ-ONLY: writes go through
       // /api/interactions so state transitions stay consistent.
       match /interactions/{jobKey} {
-        allow read: if true;
+        allow read: if mayAccess(userId);
         allow write: if false;
       }
     }
 
     // The shared, deduplicated job pool — written only by the ingest pipeline.
+    // Readable without sign-in so the app can render before auth resolves.
     match /jobs/{jobKey} {
       allow read: if true;
       allow write: if false;

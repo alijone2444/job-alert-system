@@ -23,17 +23,17 @@ import { logger } from '../utils/logger';
  * presented as a current one.
  */
 export function SavedScreen() {
-  const { deviceId } = useAppContext();
+  const { userId } = useAppContext();
   const [saved, setSaved] = useState<SavedJob[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!deviceId) return;
-    return subscribeToSaved(deviceId, (jobs) => {
+    if (!userId) return;
+    return subscribeToSaved(userId, (jobs) => {
       setSaved(jobs);
       setLoading(false);
     });
-  }, [deviceId]);
+  }, [userId]);
 
   const toFeedItem = useCallback((job: SavedJob): FeedItem => {
     const snapshot = job.snapshot;
@@ -62,20 +62,20 @@ export function SavedScreen() {
 
   const handleApply = useCallback(
     (job: FeedItem) => {
-      if (!deviceId) return;
-      applyToJob(deviceId, job.jobKey, job.applyUrl);
+      if (!userId) return;
+      applyToJob(userId, job.jobKey, job.applyUrl);
     },
-    [deviceId]
+    [userId]
   );
 
   const handleUnsave = useCallback(
     (job: FeedItem) => {
-      if (!deviceId) return;
-      unsaveJob(deviceId, job.jobKey).catch((error) =>
+      if (!userId) return;
+      unsaveJob(userId, job.jobKey).catch((error) =>
         logger.warn('Saved', `Unsave failed: ${error.message}`)
       );
     },
-    [deviceId]
+    [userId]
   );
 
   if (loading) {
@@ -117,7 +117,7 @@ export function SavedScreen() {
         contentContainerStyle={saved.length === 0 ? styles.emptyList : styles.list}
         ListEmptyComponent={
           <EmptyState
-            icon="⭐"
+            icon="bookmark"
             title="Nothing saved yet"
             message="Tap the star on any job in your feed to keep it here. Saved jobs stay even after the listing is cleared from the system."
           />

@@ -12,7 +12,7 @@
  */
 
 import { CURRENCIES, sanitizeIds } from './taxonomy.js';
-import { DEFAULT_THRESHOLDS } from '../reco/weights.js';
+import { DEFAULT_THRESHOLDS, MIN_NOTIFY_THRESHOLD } from '../reco/weights.js';
 
 /** Caps that keep a single user document bounded and queries predictable. */
 const LIMITS = {
@@ -78,7 +78,15 @@ export function sanitizePreferences(input = {}, base = defaultPreferences()) {
 
     strictCountry: Boolean(merged.strictCountry),
     feedThreshold: clampInt(merged.feedThreshold, 0, 100, DEFAULT_THRESHOLDS.feed),
-    notifyThreshold: clampInt(merged.notifyThreshold, 0, 100, DEFAULT_THRESHOLDS.notify),
+    // Clamped to the FLOOR, not to 0. A weak match must never be allowed to
+    // buzz someone's phone, even if a client asks for it — the feed is where
+    // borderline results belong.
+    notifyThreshold: clampInt(
+      merged.notifyThreshold,
+      MIN_NOTIFY_THRESHOLD,
+      100,
+      DEFAULT_THRESHOLDS.notify
+    ),
     notificationsEnabled: merged.notificationsEnabled !== false,
 
     // Bumped on every write. The cron compares this against the last-scored

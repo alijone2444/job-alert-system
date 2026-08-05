@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { FeedItem } from '../types';
+import { Icon } from './Icon';
 import { colors, matchTone, radius, shadow, sourceColors, spacing } from '../theme';
 import { JOB_TYPES, LEVELS, SKILLS, SOURCE_LABELS, WORKPLACES, labelFor } from '../domain/taxonomy';
 
@@ -158,7 +159,7 @@ export function JobCard({ job, onApply, onToggleSave, onHide, showMatch = true }
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel="Hide this job"
           >
-            <Text style={styles.iconText}>✕</Text>
+            <Icon name="close" size={16} color={colors.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -167,9 +168,11 @@ export function JobCard({ job, onApply, onToggleSave, onHide, showMatch = true }
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityLabel={job.isSaved ? 'Remove from saved' : 'Save this job'}
           >
-            <Text style={[styles.iconText, job.isSaved && styles.iconTextActive]}>
-              {job.isSaved ? '★' : '☆'}
-            </Text>
+            <Icon
+              name={job.isSaved ? 'star-filled' : 'star'}
+              size={17}
+              color={job.isSaved ? colors.warning : colors.textMuted}
+            />
           </TouchableOpacity>
 
           <TouchableOpacity

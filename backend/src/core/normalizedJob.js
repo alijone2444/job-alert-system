@@ -15,6 +15,7 @@
 
 import { createHash } from 'crypto';
 import { COUNTRY_WORLDWIDE } from './taxonomy.js';
+import { findBlockReason } from './blocklist.js';
 
 /**
  * @typedef {Object} NormalizedJob
@@ -115,6 +116,13 @@ function buildTags(job) {
 function assessQuality(job) {
   const flags = [];
   let score = 100;
+
+  // Global noise (bulk-reposters, talent pools) is rejected outright — these
+  // are not low-quality matches, they are not real openings.
+  const blockReason = findBlockReason(job.companyNorm, job.title);
+  if (blockReason) {
+    return { score: 0, flags: [`blocked:${blockReason}`] };
+  }
 
   if (!job.title || job.title.length < 3) {
     flags.push('missing_title');

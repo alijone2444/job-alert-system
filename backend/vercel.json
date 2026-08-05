@@ -11,6 +11,7 @@
     { "src": "/api/preferences", "dest": "/api/preferences.js" },
     { "src": "/api/interactions", "dest": "/api/interactions.js" },
     { "src": "/api/rescore", "dest": "/api/rescore.js" },
+    { "src": "/api/claim", "dest": "/api/claim.js" },
     { "src": "/", "dest": "/api/health.js" },
     { "src": "/(.*)", "dest": "/api/run.js" }
   ]

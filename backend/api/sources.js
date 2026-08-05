@@ -11,7 +11,7 @@ import { withApi } from '../src/http/apiKit.js';
 import { describeSources } from '../src/sources/registry.js';
 import { listSourceHealth } from '../src/repositories/settingsRepo.js';
 
-export default withApi({ methods: ['GET'] }, async () => {
+export default withApi({ methods: ['GET'], auth: 'appKey' }, async () => {
   const [sources, health] = await Promise.all([
     Promise.resolve(describeSources()),
     listSourceHealth(),

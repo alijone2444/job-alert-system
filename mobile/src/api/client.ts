@@ -31,6 +31,20 @@ type RequestOptions = {
   timeoutMs?: number;
 };
 
+/**
+ * Supplies the Firebase ID token.
+ *
+ * Injected by AppContext rather than imported, so this module has no dependency
+ * on the auth stack — which keeps it usable (and testable) in a build where
+ * sign-in is not configured yet.
+ */
+type TokenProvider = () => Promise<string | null>;
+let getToken: TokenProvider = async () => null;
+
+export function setTokenProvider(provider: TokenProvider): void {
+  getToken = provider;
+}
+
 function buildUrl(path: string, query?: RequestOptions['query']): string {
   const url = new URL(path, API_BASE_URL);
   for (const [key, value] of Object.entries(query ?? {})) {
@@ -52,6 +66,12 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (APP_API_KEY) headers['X-App-Key'] = APP_API_KEY;
+
+  // A verified Firebase ID token is the real credential; the app key is only a
+  // coarse gate for the endpoints that do not need an identity (taxonomy,
+  // health). Fetched per request because tokens expire hourly.
+  const token = await getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
 
   try {
     const response = await fetch(url, {
@@ -136,4 +156,15 @@ export const api = {
   getSources: () => request<{ sources: any[] }>('/api/sources'),
 
   getHealth: () => request<any>('/api/health'),
+
+  /**
+   * One-time migration of a pre-auth, device-keyed profile into the signed-in
+   * account. Safe to call repeatedly — the server no-ops once it has run.
+   */
+  claimDeviceData: (deviceId: string) =>
+    request<{ migrated: boolean; moved?: Record<string, number> }>('/api/claim', {
+      method: 'POST',
+      body: { deviceId },
+      timeoutMs: 30000,
+    }),
 };

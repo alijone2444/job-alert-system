@@ -36,28 +36,34 @@ export async function requestNotificationPermission(): Promise<boolean> {
 }
 
 /**
- * Full startup flow: permissions → FCM token → Firestore registration.
+ * Full startup flow: permissions → FCM token → account registration.
+ *
+ * Takes the signed-in `userId` because the token must be stored against the
+ * ACCOUNT, not the handset — otherwise notifications follow the device and a
+ * user who signs in on a second phone gets nothing on it.
  */
-export async function setupPushNotifications(): Promise<NotificationSetupResult> {
+export async function setupPushNotifications(userId: string): Promise<NotificationSetupResult> {
   logger.divider('PushSetup');
   logger.info('PushSetup', 'Starting push notification setup...');
 
+  const deviceId = await getDeviceId();
   const permissionGranted = await requestNotificationPermission();
 
   if (!permissionGranted) {
-    const deviceId = await getDeviceId();
     logger.warn('PushSetup', 'Setup incomplete — permission denied');
+    // Still register, so the account exists and the cron builds a feed even
+    // without push.
+    await registerDevice(userId, null).catch(() => {});
     return { deviceId, fcmToken: null, permissionGranted: false };
   }
 
-  const deviceId = await getDeviceId();
   let fcmToken: string | null = null;
 
   try {
     fcmToken = await messaging().getToken();
     if (fcmToken) {
       logger.success('FCM', `Token received: ${fcmToken.slice(0, 24)}...`);
-      await registerDevice(deviceId, fcmToken);
+      await registerDevice(userId, fcmToken);
       logger.success('PushSetup', 'Push notifications fully configured!');
     } else {
       logger.warn('FCM', 'getToken() returned empty token');

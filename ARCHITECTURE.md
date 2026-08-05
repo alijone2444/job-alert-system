@@ -434,6 +434,48 @@ forever.
 
 ---
 
+## 10b. The read budget — the constraint that shaped fan-out
+
+Firestore's free tier allows **50,000 document reads per day**. This system runs
+**720 times a day**. That is a budget of roughly **70 reads per run for the
+entire product**, and it is a hard architectural constraint, not a footnote.
+
+The first version blew through it by a factor of 26 and exhausted the daily
+quota in a few hours. Where it went:
+
+| Cost | Per run | Why |
+|---|---|---|
+| `trimFeed` using `.offset(300)` | **~1,500** | Firestore **bills every document an offset walks past**. It is not a cheap skip. |
+| `findExistingKeys` per user | ~250 | Checking whether each match was already in a feed |
+| Users + preferences read twice | ~10 | The engine loaded them, then fan-out loaded them again |
+| `findExisting` over a 24h window | ~60 | A 24-hour lookback re-fetched the same day of jobs 720 times |
+| Retention prune at 7% of runs | ~20 avg | Housekeeping nobody is waiting for |
+| **Total** | **~1,900** | **≈1.3M reads/day** |
+
+The fixes, in order of what they taught:
+
+1. **`.offset()` is not free.** Replaced with an ascending-by-score page sized
+   from a count the caller already has.
+2. **A globally-new job cannot be in anybody's feed.** It has never been scored.
+   The membership check was asking a question we could already answer, at ~250
+   reads a run.
+3. **Pass state down, don't re-read it.** Users and preferences are loaded once
+   by the engine and handed to fan-out.
+4. **A quiet run must cost zero.** No new jobs and nobody needing a rebuild now
+   returns before touching Firestore. Most runs are quiet runs.
+5. **The lookback window is a catch-up window, not a filter.** Cut from 24h to
+   3h: stored jobs live 30 days regardless, so the only thing 24h bought was
+   tolerating a full day of downtime — at 720× the redundant work.
+
+Now ~30 reads per run, ~22,000/day, comfortably inside the free tier.
+
+**If you raise the cadence or add users, redo this arithmetic first.** The
+formula is `reads_per_run × 720 ≤ 50,000`. Beyond it, the options are the Blaze
+plan (reads past the free allowance are ~$0.06 per 100,000 — cents per month at
+this scale) or a longer cron interval.
+
+---
+
 ## 11. Notifications
 
 Previously: multicast every job to every device — the exact thing

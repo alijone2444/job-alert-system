@@ -14,8 +14,19 @@ import { resolveScoringConfig } from '../reco/weights.js';
 const log = createLogger('SettingsRepo');
 
 export const DEFAULT_INGEST_SETTINGS = {
-  /** How far back each source looks. 24h absorbs a few failed runs safely. */
-  freshnessWindowMs: 24 * 60 * 60 * 1000,
+  /**
+   * How far back each source looks.
+   *
+   * THREE HOURS, not 24. With a 2-minute cron a 24-hour lookback re-fetches the
+   * same day of postings 720 times, and every one of those jobs then costs a
+   * Firestore read in the "have we seen this already?" check — which is what
+   * pushed the system past the free tier's 50,000 reads/day.
+   *
+   * This is a CATCH-UP window, not a filter on what users see: stored jobs stay
+   * in the pool for 30 days regardless. Three hours means the system can be
+   * completely down for three hours and still miss nothing.
+   */
+  freshnessWindowMs: Number(process.env.FRESHNESS_WINDOW_MS) || 3 * 60 * 60 * 1000,
   /** Per-source cap per run — keeps one chatty board from starving the others. */
   maxJobsPerSource: 60,
   /** LinkedIn detail requests per run (rate-limit budget). */

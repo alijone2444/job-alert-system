@@ -36,8 +36,19 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
   const { items, loading, refreshing, error, refresh } = useFeed(userId);
 
   const [query, setQuery] = useState('');
-  const [sourceFilter, setSourceFilter] = useState<string | null>(null);
+  /**
+   * MULTI-select, like every other selector in the app. Empty = "All sources".
+   * Selecting LinkedIn and Ashby shows exactly those two — a single-choice
+   * filter would have been the one place the app forced a either/or.
+   */
+  const [sourceFilter, setSourceFilter] = useState<string[]>([]);
   const [minScore, setMinScore] = useState(0);
+
+  const toggleSource = useCallback((source: string) => {
+    setSourceFilter((current) =>
+      current.includes(source) ? current.filter((id) => id !== source) : [...current, source]
+    );
+  }, []);
 
   /** Only offer source chips for boards actually present in this feed. */
   const availableSources = useMemo(() => {
@@ -49,7 +60,8 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return items.filter((item) => {
-      if (sourceFilter && item.source !== sourceFilter) return false;
+      // Empty selection means "All sources".
+      if (sourceFilter.length && !sourceFilter.includes(item.source)) return false;
       if (item.score < minScore) return false;
       if (!needle) return true;
       return `${item.title} ${item.company ?? ''} ${item.location ?? ''}`
@@ -141,19 +153,22 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
                 <Chip
                   label="All sources"
                   size="sm"
-                  selected={sourceFilter === null}
-                  onPress={() => setSourceFilter(null)}
+                  selected={sourceFilter.length === 0}
+                  onPress={() => setSourceFilter([])}
                 />
-                {availableSources.map(([source, count]) => (
-                  <Chip
-                    key={source}
-                    size="sm"
-                    label={`${SOURCE_LABELS[source] ?? source} ${count}`}
-                    dotColor={sourceFilter === source ? undefined : sourceColors[source]}
-                    selected={sourceFilter === source}
-                    onPress={() => setSourceFilter(sourceFilter === source ? null : source)}
-                  />
-                ))}
+                {availableSources.map(([source, count]) => {
+                  const selected = sourceFilter.includes(source);
+                  return (
+                    <Chip
+                      key={source}
+                      size="sm"
+                      label={`${SOURCE_LABELS[source] ?? source} ${count}`}
+                      dotColor={selected ? undefined : sourceColors[source]}
+                      selected={selected}
+                      onPress={() => toggleSource(source)}
+                    />
+                  );
+                })}
               </View>
             ) : null}
 
@@ -196,7 +211,7 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
                 label: 'Clear filters',
                 onPress: () => {
                   setQuery('');
-                  setSourceFilter(null);
+                  setSourceFilter([]);
                   setMinScore(0);
                 },
               }}

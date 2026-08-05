@@ -419,14 +419,17 @@ export function detectCountry(text) {
 }
 
 /**
- * Plausible salary ranges per period, used to reject false positives.
- * Values are in the ORIGINAL currency, so the bands are deliberately wide —
- * an annual PKR salary is legitimately in the millions.
+ * Plausible salary ranges per period, **normalised to USD**.
+ *
+ * Currency-native bands had to be absurdly wide to accommodate PKR (where an
+ * annual salary is legitimately in the millions), and that width let genuine
+ * nonsense through — a "$40 million" funding line passed as a salary.
+ * Converting first lets the bands be tight and still correct in every currency.
  */
-const SALARY_BOUNDS = {
-  hour: [5, 5_000],
-  month: [500, 5_000_000],
-  year: [8_000, 500_000_000],
+const SALARY_BOUNDS_USD = {
+  hour: [3, 2_000],
+  month: [150, 100_000],
+  year: [4_000, 2_000_000],
 };
 
 /**
@@ -450,41 +453,78 @@ export function detectSalary(text) {
   const raw = String(text);
 
   // "$120,000 - $150,000" | "PKR 150k-250k" | "£65k" | "USD 150,000 to 200,000"
+  //
+  // Two subtleties in the suffix group, both found by testing:
+  //
+  //  - `(?![a-z])` stops the "m" in "we raised $40 million" being read as a
+  //    millions suffix, which turned a funding announcement into a $40M salary.
+  //  - The lookahead sits INSIDE the optional group. Outside it, a number
+  //    followed by a letter ("$115000usd") made the lookahead fail, and the
+  //    engine backtracked into the DIGITS to satisfy it — silently parsing
+  //    115000 as 11500.
   const re =
-    /(\$|£|€|₹|₨|usd|pkr|gbp|eur|aed|cad|aud|inr|sar|sgd|rs\.?)\s?(\d[\d,]*(?:\.\d+)?)\s?(k|m)?\s*(?:-|–|—|to|until)?\s*(?:(?:\$|£|€|₹|₨)?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|m)?)?/i;
+    /(\$|£|€|₹|₨|usd|pkr|gbp|eur|aed|cad|aud|inr|sar|sgd|rs\.?)\s?(\d[\d,]*(?:\.\d+)?)\s?(?:(k|m)(?![a-z]))?\s*(?:-|–|—|to|until)?\s*(?:(?:\$|£|€|₹|₨)?\s?(\d[\d,]*(?:\.\d+)?)\s?(?:(k|m)(?![a-z]))?)?/i;
   const match = raw.match(re);
   if (!match) return null;
 
   const [, symbol, rawMin, minSuffix, rawMax, maxSuffix] = match;
-
-  // Guard 1: does this even look like money rather than a stray number?
-  if (!looksMonetary(rawMin, minSuffix)) return null;
-
   const currency = CURRENCY_SYMBOLS[symbol.toLowerCase().replace('.', '')] || 'USD';
-  const min = parseAmount(rawMin, minSuffix);
-  const max = looksMonetary(rawMax, maxSuffix) ? parseAmount(rawMax, maxSuffix) : null;
-  if (min == null && max == null) return null;
 
-  const period = /per hour|\/\s?hr|hourly|an hour/i.test(raw)
+  /**
+   * Period is read from a WINDOW AROUND THE MATCH, not the whole document.
+   *
+   * Scanning the full description meant any "monthly" anywhere in a 4,000-char
+   * posting — a benefits paragraph, a "monthly team lunch" — relabelled the
+   * salary. A real listing rendered "$145k-170k" as a MONTHLY figure, i.e. a
+   * $1.7M package, purely because the word appeared hundreds of characters
+   * away from the number.
+   */
+  const start = Math.max(0, match.index - 40);
+  const context = raw.slice(start, match.index + match[0].length + 40);
+
+  let period = /per hour|\/\s?hr\b|hourly|an hour|each hour/i.test(context)
     ? 'hour'
-    : /per month|\/\s?mo\b|monthly|a month/i.test(raw)
+    : /per month|\/\s?mo\b|monthly|a month|each month/i.test(context)
       ? 'month'
       : 'year';
 
-  // Guard 2: plausible for that period?
-  const [low, high] = SALARY_BOUNDS[period];
+  // Guard 1: does this look like money rather than a stray number?
+  // Period-aware, because an hourly rate is legitimately two digits ("$65/hr")
+  // while a two-digit annual salary is always a false positive.
+  if (!looksMonetary(rawMin, minSuffix, period)) return null;
+
+  const min = parseAmount(rawMin, minSuffix);
+  const max = looksMonetary(rawMax, maxSuffix, period) ? parseAmount(rawMax, maxSuffix) : null;
+  if (min == null && max == null) return null;
+
+  /**
+   * Magnitude cross-check. Even with a tight window, a "$145k per month"
+   * reading is far more likely to be an annual figure with a stray token than
+   * a genuine $1.7M package. Compared in USD so the rule still holds for PKR,
+   * where a monthly figure in the hundreds of thousands is entirely normal.
+   */
   const probe = min ?? max;
-  if (probe < low || probe > high) return null;
+  const usd = probe * (FX_TO_USD[currency] ?? 1);
+  if (period === 'month' && usd > 50_000) period = 'year';
+  if (period === 'hour' && usd > 1_000) period = 'year';
+
+  // Guard 2: plausible for that period, judged in USD?
+  const [low, high] = SALARY_BOUNDS_USD[period];
+  if (usd < low || usd > high) return null;
 
   return { min, max: max ?? null, currency, period };
 }
 
-/** Comma-grouped, k/m-suffixed, or 4+ digits — otherwise it is not a salary. */
-function looksMonetary(digits, suffix) {
+/**
+ * Comma-grouped, k/m-suffixed, or enough digits — otherwise it is not money.
+ * Hourly rates need only 2 digits; the plausibility band catches the rest.
+ */
+function looksMonetary(digits, suffix, period = 'year') {
   if (!digits) return false;
   if (suffix) return true;
   if (digits.includes(',')) return true;
-  return digits.replace(/[^\d]/g, '').length >= 4;
+  const length = digits.replace(/[^\d]/g, '').length;
+  return period === 'hour' ? length >= 2 : length >= 4;
 }
 
 function parseAmount(digits, suffix) {

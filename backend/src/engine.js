@@ -37,8 +37,14 @@ import { buildCronReport, saveCronRunReport } from './services/cronReport.js';
 
 const log = createLogger('Engine');
 
-/** Prune at most once every ~30 minutes rather than on every 2-minute run. */
-const PRUNE_PROBABILITY = 0.07;
+/**
+ * Retention pruning runs on ~1 run in 200, i.e. a few times a day.
+ *
+ * It is a 300-document query, and on the free tier the ENTIRE system has a
+ * 50,000-read/day budget across 720 runs. Housekeeping that nobody is waiting
+ * for does not get to spend 4% of that.
+ */
+const PRUNE_PROBABILITY = 0.005;
 
 /** Fan-out never gets less than this, however long ingestion took. */
 const FANOUT_MIN_BUDGET_MS = 12_000;
@@ -130,6 +136,11 @@ export async function runEngine() {
       newJobs: ingestion.newJobs,
       scoringConfig,
       budget: createBudget(Math.max(FANOUT_MIN_BUDGET_MS, budget.remainingMs())),
+      // Handed the users and preferences this run already loaded. Re-reading
+      // them inside fan-out doubled the fixed read cost of every single run,
+      // 720 times a day, for no new information.
+      users,
+      preferences: preferencesByUser,
       notify: true,
     });
 

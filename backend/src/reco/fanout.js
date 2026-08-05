@@ -13,6 +13,21 @@
  *               NO notifications — the user is looking at the app right now,
  *               and buzzing their phone 40 times because they ticked "Remote"
  *               would be indefensible.
+ *
+ * ---------------------------------------------------------------------------
+ * READ BUDGET. Firestore's free tier allows 50,000 document reads per DAY, and
+ * this function runs 720 times a day. That is a budget of ~70 reads per run for
+ * the entire system, so every query here is deliberate:
+ *
+ *   - Users and preferences are passed IN, not re-read (the engine already has
+ *     them; reading them twice doubled the fixed cost of every run).
+ *   - Hidden-job keys are fetched only for users who actually have something to
+ *     score this run.
+ *   - Feed membership is NOT checked in the incremental path: a job that is new
+ *     to the `jobs` collection has never been scored, so it cannot already be
+ *     in anyone's feed. That inference removed ~250 reads per run.
+ *   - Trimming is driven by a count the caller already knows.
+ * ---------------------------------------------------------------------------
  */
 
 import { createLogger } from '../core/logger.js';
@@ -30,24 +45,48 @@ const log = createLogger('Fanout');
 const REBUILD_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const REBUILD_CANDIDATE_LIMIT = 400;
 
+function needsRebuild(user) {
+  return (user.prefsVersion ?? 0) !== (user.lastScoredPrefsVersion ?? -1);
+}
+
 /**
  * @param {Object} options
- * @param {Object[]} options.newJobs      Jobs first seen this run.
- * @param {Object}   options.scoringConfig {weights, tuning}
+ * @param {Object[]} options.newJobs        Jobs first seen this run.
+ * @param {Object}   options.scoringConfig  {weights, tuning}
  * @param {Object}   options.budget
- * @param {boolean}  [options.notify]     Master switch for push.
+ * @param {Object[]} [options.users]        Pre-loaded, to avoid a second read.
+ * @param {Map}      [options.preferences]  Pre-loaded, likewise.
+ * @param {boolean}  [options.notify]       Master switch for push.
  * @returns {Promise<Object>} stats
  */
-export async function fanOut({ newJobs, scoringConfig, budget, notify = true }) {
-  const users = await usersRepo.listUsers();
+export async function fanOut({
+  newJobs,
+  scoringConfig,
+  budget,
+  users: preloadedUsers = null,
+  preferences: preloadedPreferences = null,
+  notify = true,
+}) {
+  const users = preloadedUsers ?? (await usersRepo.listUsers());
   if (!users.length) {
     log.warn('no registered users — nothing to fan out to');
     return { users: 0, entriesWritten: 0, notificationsSent: 0, rebuilds: 0 };
   }
 
+  const rebuildQueue = users.filter(needsRebuild);
+
+  /**
+   * The overwhelming majority of runs find nothing new and nobody to rebuild.
+   * Returning here keeps a quiet run at ZERO reads, which is what makes 720
+   * runs a day affordable at all.
+   */
+  if (!newJobs.length && !rebuildQueue.length) {
+    log.debug('nothing to fan out');
+    return { users: users.length, entriesWritten: 0, notificationsSent: 0, rebuilds: 0, idle: true };
+  }
+
   const userIds = users.map((user) => user.userId);
-  const preferencesByUser = await usersRepo.getPreferencesForUsers(userIds);
-  const hiddenByUser = await interactionsRepo.getHiddenKeysForUsers(userIds);
+  const preferencesByUser = preloadedPreferences ?? (await usersRepo.getPreferencesForUsers(userIds));
 
   // Only loaded if at least one user actually needs a rebuild — it is by far
   // the most expensive read in the run.
@@ -69,11 +108,13 @@ export async function fanOut({ newJobs, scoringConfig, budget, notify = true }) 
     }
 
     const prefs = preferencesByUser.get(user.userId);
-    const hidden = hiddenByUser.get(user.userId) || new Set();
-    const needsRebuild = (user.prefsVersion ?? 0) !== (user.lastScoredPrefsVersion ?? -1);
+    const rebuilding = needsRebuild(user);
+
+    // Nothing new AND no rebuild -> this user costs nothing this run.
+    if (!rebuilding && !newJobs.length) continue;
 
     let candidates = newJobs;
-    if (needsRebuild) {
+    if (rebuilding) {
       if (!rebuildPool) {
         rebuildPool = await jobsRepo.findRecent({
           sinceMs: REBUILD_WINDOW_MS,
@@ -90,6 +131,9 @@ export async function fanOut({ newJobs, scoringConfig, budget, notify = true }) 
       });
     }
 
+    // Fetched per user, but only for users with work to do.
+    const hidden = await interactionsRepo.getHiddenKeys(user.userId);
+
     /* ------------------------------ score ------------------------------ */
     // A user who has not personalised anything gets an unfiltered feed rather
     // than an empty one — see hasAnyPreference() for the reasoning.
@@ -105,35 +149,34 @@ export async function fanOut({ newJobs, scoringConfig, budget, notify = true }) 
     }
 
     if (!matches.length) {
-      if (needsRebuild) await usersRepo.markScored(user.userId, user.prefsVersion ?? 0);
+      if (rebuilding) await usersRepo.markScored(user.userId, user.prefsVersion ?? 0);
       continue;
     }
 
     /* ------------------------------ write ------------------------------ */
-    // Which of these are genuinely new TO THIS USER? Checked before writing,
-    // because writing is what makes them look old.
-    const alreadyInFeed = await feedRepo.findExistingKeys(
-      user.userId,
-      matches.map((match) => match.job.jobKey)
-    );
-
     await feedRepo.writeEntries(user.userId, matches);
     entriesWritten += matches.length;
 
     /* ---------------------------- notify ------------------------------- */
-    if (notify && !needsRebuild && prefs.notificationsEnabled && user.fcmToken) {
-      const notifiable = matches.filter(
-        (match) =>
-          !alreadyInFeed.has(match.job.jobKey) && match.result.score >= prefs.notifyThreshold
-      );
-
+    /**
+     * No feed-membership check needed. These jobs were first seen in the
+     * `jobs` collection THIS run, so they have never been scored for anyone
+     * and cannot already be in this user's feed. The check that used to be
+     * here cost ~50 reads per user per run and told us something we could
+     * already prove.
+     */
+    if (notify && !rebuilding && prefs.notificationsEnabled && user.fcmToken) {
+      const notifiable = matches.filter((match) => match.result.score >= prefs.notifyThreshold);
       if (notifiable.length) {
         deliveries.push({ userId: user.userId, token: user.fcmToken, matches: notifiable });
       }
     }
 
-    await feedRepo.trimFeed(user.userId);
-    if (needsRebuild) await usersRepo.markScored(user.userId, user.prefsVersion ?? 0);
+    // Only a rebuild can overflow the cap; an incremental run adds a handful.
+    if (rebuilding) {
+      await feedRepo.trimFeed(user.userId, { expectedSize: matches.length });
+      await usersRepo.markScored(user.userId, user.prefsVersion ?? 0);
+    }
   }
 
   /* ------------------------------- push -------------------------------- */
@@ -162,9 +205,9 @@ export async function fanOut({ newJobs, scoringConfig, budget, notify = true }) 
 }
 
 /**
- * Rebuild ONE user's feed on demand — powers `POST /api/rescore`, so the
- * Personalize screen can show results immediately instead of waiting up to two
- * minutes for the next cron tick.
+ * Rebuild ONE user's feed on demand — powers `POST /api/rescore` and the
+ * preference-save path, so the Personalize screen shows results immediately
+ * instead of waiting up to two minutes for the next cron tick.
  *
  * @returns {Promise<{matched:number, scanned:number}>}
  */
@@ -184,7 +227,7 @@ export async function rebuildUserFeed(userId, { scoringConfig, windowMs = REBUIL
 
   await feedRepo.clearFeed(userId);
   await feedRepo.writeEntries(userId, matches);
-  await feedRepo.trimFeed(userId);
+  await feedRepo.trimFeed(userId, { expectedSize: matches.length });
   await usersRepo.markScored(userId, prefs.version ?? 0);
 
   log.info('feed rebuilt on demand', { userId, scanned: candidates.length, matched: matches.length });

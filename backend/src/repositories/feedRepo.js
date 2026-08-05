@@ -199,14 +199,49 @@ export async function clearFeed(userId) {
   return deleted;
 }
 
-/** Trim the lowest-scoring entries once a feed exceeds MAX_FEED_SIZE. */
-export async function trimFeed(userId, maxSize = MAX_FEED_SIZE) {
-  const snapshot = await feedRef(userId).orderBy('score', 'desc').offset(maxSize).limit(200).get();
+/**
+ * Trim the lowest-scoring entries once a feed exceeds MAX_FEED_SIZE.
+ *
+ * COST WARNING, learned the expensive way: `.offset(n)` does NOT skip cheaply
+ * in Firestore — you are billed a document read for every row the offset walks
+ * past. `offset(300)` cost 300 reads per user per run, which at a 2-minute
+ * cadence was ~1.1M reads/day on its own and exhausted the free tier.
+ *
+ * Instead: ascending by score (cheapest entries first), read only a small page,
+ * and delete the ones that are surplus. `expectedSize` comes from the caller,
+ * which already knows how much it just wrote, so the common case does no work
+ * and costs nothing.
+ */
+export async function trimFeed(userId, { maxSize = MAX_FEED_SIZE, expectedSize = null } = {}) {
+  // The caller knows the feed cannot be over the cap — skip the query entirely.
+  if (expectedSize !== null && expectedSize <= maxSize) return 0;
+
+  const surplus = expectedSize === null ? 50 : Math.min(200, expectedSize - maxSize);
+  if (surplus <= 0) return 0;
+
+  const snapshot = await feedRef(userId).orderBy('score', 'asc').limit(surplus).get();
   if (snapshot.empty) return 0;
 
   const batch = getFirestore().batch();
   for (const doc of snapshot.docs) batch.delete(doc.ref);
   await batch.commit();
 
+  log.debug('trimmed feed', { userId, removed: snapshot.size });
   return snapshot.size;
+}
+
+/**
+ * How many entries a user's feed holds.
+ *
+ * Uses an aggregate count() query, which is billed at roughly one read per
+ * 1,000 documents counted instead of one per document — the difference between
+ * a few reads a day and a few thousand.
+ */
+export async function countFeed(userId) {
+  try {
+    const snapshot = await feedRef(userId).count().get();
+    return snapshot.data().count ?? 0;
+  } catch {
+    return null; // aggregate unsupported -> caller falls back to skipping trim
+  }
 }

@@ -4,6 +4,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AppProvider, useAppContext } from './src/context/AppContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { SignInScreen } from './src/screens/SignInScreen';
+import { InAppAlert } from './src/components/InAppAlert';
+import { RemoteMessageData } from './src/types';
 import {
   setupPushNotifications,
   onForegroundMessage,
@@ -27,6 +29,7 @@ import { logger } from './src/utils/logger';
 function AuthedApp() {
   const { userId } = useAppContext();
   const [ready, setReady] = useState(false);
+  const [inAppAlert, setInAppAlert] = useState<RemoteMessageData | null>(null);
 
   const handleNotificationTap = useCallback(
     (data: Record<string, unknown> | undefined, uid: string | null) => {
@@ -37,6 +40,15 @@ function AuthedApp() {
       applyToJob(uid, parsed.jobKey, parsed.applyUrl);
     },
     []
+  );
+
+  const openInAppAlert = useCallback(
+    (alert: RemoteMessageData) => {
+      setInAppAlert(null);
+      if (!alert.applyUrl || !alert.jobKey || !userId) return;
+      applyToJob(userId, alert.jobKey, alert.applyUrl);
+    },
+    [userId]
   );
 
   useEffect(() => {
@@ -73,10 +85,20 @@ function AuthedApp() {
 
     init();
 
-    // Foreground pushes stay silent — the feed listener already inserts the
-    // card live, so a popup would interrupt to announce something on screen.
+    /**
+     * A push that lands while the app is open gets an in-app banner, not an OS
+     * popup.
+     *
+     * This used to only write a log line — the message was received and then
+     * dropped entirely. That looked exactly like "notifications are broken":
+     * anyone testing with the app open saw nothing at all, and a match arriving
+     * while they were on Saved or Personalize was announced nowhere, since
+     * neither of those screens shows the feed.
+     */
     const foregroundUnsub = onForegroundMessage((message) => {
-      logger.info('App', `Match arrived in foreground: ${message.notification?.title ?? ''}`);
+      const parsed = parseRemoteMessageData(message.data);
+      logger.info('App', `Match arrived in foreground: ${parsed.title ?? ''}`);
+      if (parsed.jobKey || parsed.type === 'digest') setInAppAlert(parsed);
     });
 
     const openedUnsub = onNotificationOpened((message) => {
@@ -95,7 +117,16 @@ function AuthedApp() {
   // but keeps the init promise observable for future splash work.
   void ready;
 
-  return <AppNavigator />;
+  return (
+    <>
+      <AppNavigator />
+      <InAppAlert
+        alert={inAppAlert}
+        onOpen={openInAppAlert}
+        onDismiss={() => setInAppAlert(null)}
+      />
+    </>
+  );
 }
 
 function Gate() {

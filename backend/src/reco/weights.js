@@ -83,12 +83,20 @@ export const DEFAULT_TUNING = {
 };
 
 /**
- * A notification interrupts someone's day, so it has a HARD FLOOR, not just a
- * default. Nothing below this may ever trigger a push, whatever a client sends
- * — `sanitizePreferences` clamps to it. The feed is where borderline matches
- * belong; the notification tray is not.
+ * The lowest notification threshold a user is allowed to choose.
+ *
+ * This was 85, enforced as a hard floor on the reasoning that a notification
+ * interrupts someone's day and the feed is where borderline matches belong.
+ * That reasoning was mine, not the user's: what they actually want is to hear
+ * about every genuine new opening, and the feed threshold ALREADY guarantees
+ * relevance — nothing reaches the feed without clearing it.
+ *
+ * So the floor is gone. Volume is controlled where it belongs instead: the
+ * quality gate drops fake and reposted listings before they exist, a job is
+ * only ever announced once, and no more than three arrive per cycle before
+ * they collapse into a single summary.
  */
-export const MIN_NOTIFY_THRESHOLD = 85;
+export const MIN_NOTIFY_THRESHOLD = 0;
 
 /** Feed/notification cut-offs when a user has not chosen their own. */
 export const DEFAULT_THRESHOLDS = {
@@ -98,8 +106,12 @@ export const DEFAULT_THRESHOLDS = {
    * The app exposes this as a slider — raise it once the pool is warm.
    */
   feed: 70,
-  /** Push notifications interrupt, so the bar is much higher. See above. */
-  notify: MIN_NOTIFY_THRESHOLD,
+  /**
+   * Matches the feed threshold: if a job was good enough to show, it is good
+   * enough to mention. A higher value here means "show me more than you tell
+   * me about", which is a choice, not a default.
+   */
+  notify: 70,
 };
 
 /**

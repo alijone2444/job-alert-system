@@ -78,9 +78,12 @@ export function sanitizePreferences(input = {}, base = defaultPreferences()) {
 
     strictCountry: Boolean(merged.strictCountry),
     feedThreshold: clampInt(merged.feedThreshold, 0, 100, DEFAULT_THRESHOLDS.feed),
-    // Clamped to the FLOOR, not to 0. A weak match must never be allowed to
-    // buzz someone's phone, even if a client asks for it — the feed is where
-    // borderline results belong.
+    /**
+     * No artificial floor any more — see MIN_NOTIFY_THRESHOLD. Setting this
+     * BELOW the feed threshold is harmless rather than dangerous: a job under
+     * the feed threshold never enters the feed, so it can never be announced.
+     * The feed threshold is the real lower bound, whatever is stored here.
+     */
     notifyThreshold: clampInt(
       merged.notifyThreshold,
       MIN_NOTIFY_THRESHOLD,

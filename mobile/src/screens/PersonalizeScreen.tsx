@@ -347,21 +347,26 @@ export function PersonalizeScreen() {
                 </Text>
               </View>
             </View>
-            {/* 85 is a hard floor enforced by the backend, not just a default —
-                a weak match must never be allowed to interrupt you. */}
+            {/* Phrased as intent, not as a number. "Notify me at 82%" is not a
+                thought anyone has; "tell me about everything you show me" is. */}
             <View style={styles.chipRow}>
-              {[85, 90, 95].map((value) => (
+              {[
+                { value: draft.feedThreshold, label: 'Every job in my feed' },
+                { value: 85, label: 'Strong only (85%+)' },
+                { value: 90, label: 'Excellent only (90%+)' },
+              ].map((option) => (
                 <Chip
-                  key={value}
+                  key={option.label}
                   size="sm"
-                  label={`${value}%`}
-                  selected={draft.notifyThreshold === value}
-                  onPress={() => update('notifyThreshold', value)}
+                  label={option.label}
+                  selected={draft.notifyThreshold === option.value}
+                  onPress={() => update('notifyThreshold', option.value)}
                 />
               ))}
             </View>
             <Text style={styles.hint}>
-              Anything below 85% stays in your feed and never sends a notification.
+              You are only ever told about a job once, and never more than 3 alerts per check —
+              beyond that they arrive as a single summary.
             </Text>
 
             <View style={styles.switchRow}>

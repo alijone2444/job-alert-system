@@ -94,7 +94,36 @@ function applyHardFilters(job, prefs) {
     }
   }
 
-  // Opt-in strictness: only reject on country when the user explicitly asked.
+  /**
+   * JOB TYPE and WORKPLACE are hard filters, not scoring dimensions.
+   *
+   * They used to be soft: a mismatch scored 0 on a weight-10 dimension, which
+   * costs about 11 points out of ~90. A full-time role with the right skills,
+   * country and workplace still cleared a 70% threshold — so a user who had
+   * selected "Part-time" was shown 27 full-time jobs and 2 part-time ones.
+   *
+   * That is indefensible. When someone ticks "Part-time" they are stating a
+   * constraint, not a preference to be weighed: a full-time job is not a
+   * slightly worse match, it is one they cannot take. Every job board on earth
+   * treats these as filters, and so does the user's mental model.
+   *
+   * Applied ONLY when the job's value is actually known. Coverage is around a
+   * third for job type, and rejecting everything unlabelled would throw away
+   * far more good jobs than it saved — unknown stays neutral and is scored.
+   */
+  if (prefs.jobTypes?.length && job.jobType && !prefs.jobTypes.includes(job.jobType)) {
+    return `Not a selected job type (${job.jobType})`;
+  }
+
+  if (prefs.workplaces?.length && job.workplace && !prefs.workplaces.includes(job.workplace)) {
+    return `Not a selected workplace (${job.workplace})`;
+  }
+
+  /**
+   * COUNTRY stays soft unless explicitly made strict, and that asymmetry is
+   * deliberate: a remote job posted in another country is often genuinely open
+   * to you, whereas a full-time job is never part-time.
+   */
   if (prefs.strictCountry && prefs.countries?.length && job.country) {
     const isWorldwide = job.country === COUNTRY_WORLDWIDE;
     const isRemote = job.workplace === WORKPLACE.REMOTE;

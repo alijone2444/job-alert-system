@@ -25,3 +25,6 @@ _vercel-env.txt
 
 # Backup left by the google-services swap during the auth migration
 mobile/android/app/google-services.json.bak
+
+# Release APKs are build output, not source
+builds/*.apk

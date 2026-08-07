@@ -172,10 +172,23 @@ export async function fanOut({
       }
     }
 
-    // Only a rebuild can overflow the cap; an incremental run adds a handful.
     if (rebuilding) {
+      // The feed was cleared first, so what we just wrote IS its whole size.
       await feedRepo.trimFeed(user.userId, { expectedSize: matches.length });
       await usersRepo.markScored(user.userId, user.prefsVersion ?? 0);
+    } else {
+      /**
+       * Incremental runs also have to trim. The previous version trimmed only
+       * on rebuild, on the assumption that "an incremental run adds a handful"
+       * — true per run, but there are 720 of them a day, and handfuls
+       * accumulate. Live feeds had reached 613 entries against a cap of 300.
+       *
+       * The count() aggregate is billed at roughly one read per 1,000 documents
+       * rather than one per document, and this only runs on the rare cycle that
+       * actually wrote something.
+       */
+      const size = await feedRepo.countFeed(user.userId);
+      if (size !== null) await feedRepo.trimFeed(user.userId, { expectedSize: size });
     }
   }
 

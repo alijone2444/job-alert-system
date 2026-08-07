@@ -44,7 +44,19 @@ export async function runIngestion({
   enrichBudgetMs = 0,
 }) {
   const runBudget = budget || createBudget(settings.runBudgetMs);
-  const sources = getEnabledSources();
+
+  /**
+   * Rotate which source goes first each run.
+   *
+   * The fetch budget usually runs out partway through the list, and iterating
+   * a fixed order meant the SAME trailing sources were skipped every single
+   * time — observed live: ashby, remoteok and weworkremotely deferred on every
+   * run, i.e. never fetched at all. Deferral is only acceptable if it is fair.
+   */
+  const sourceCount = getEnabledSources().length;
+  const offset = sourceCount ? Math.floor(Date.now() / 120_000) % sourceCount : 0;
+  const enabled = getEnabledSources();
+  const sources = [...enabled.slice(offset), ...enabled.slice(0, offset)];
 
   const fetched = [];
   const sourceReports = [];
@@ -79,7 +91,8 @@ export async function runIngestion({
       const jobs = await source.fetchJobs({
         limit: settings.maxJobsPerSource,
         countries,
-        sinceMs: settings.freshnessWindowMs,
+        // A source may narrow the window, never widen it.
+        sinceMs: Math.min(settings.freshnessWindowMs, source.maxSinceMs ?? Infinity),
         budget: runBudget,
         logger: sourceLogger,
         config: {},
@@ -152,10 +165,42 @@ export async function runIngestion({
   const detailBudget = createBudget(enrichBudgetMs || 8_000);
 
   let enrichedCount = 0;
+  const backfilled = [];
+
   for (const source of sources) {
     if (!source.enrich || detailBudget.expired(1_000)) continue;
 
     const candidates = newJobs.filter((job) => job.sourceId === source.id && !job.enriched);
+
+    /**
+     * BACKLOG. New jobs get first claim on the detail budget, but any spare
+     * capacity goes to jobs stranded by earlier runs.
+     *
+     * Without this, a job that arrived in a busy run was written with no
+     * description and no skills and stayed that way forever — 35% of stored
+     * LinkedIn jobs — which meant it could never clear the notification
+     * threshold no matter how well it actually matched someone.
+     */
+    if (candidates.length < settings.maxEnrichPerRun) {
+      try {
+        const stale = await jobsRepo.findUnenriched(source.id, {
+          limit: settings.maxEnrichPerRun - candidates.length,
+          sinceMs: settings.retentionMs,
+        });
+        candidates.push(...stale);
+        backfilled.push(...stale);
+      } catch (error) {
+        // WARN, not debug. The first version logged this at debug level and a
+        // missing-index error hid there indefinitely while the backlog
+        // reported zero. A silently-failing repair job is worse than no repair
+        // job, because it looks like there is nothing to repair.
+        log.warn('could not load enrichment backlog', {
+          sourceId: source.id,
+          error: error.message,
+        });
+      }
+    }
+
     if (!candidates.length) continue;
 
     try {
@@ -169,12 +214,17 @@ export async function runIngestion({
     }
   }
 
+  // Backlog jobs already exist, so they must be re-saved to keep what the
+  // detail pass just learned. Only the ones it actually reached.
+  const enrichedBacklog = backfilled.filter((job) => job.enriched);
+  for (const job of enrichedBacklog) refreshDerivedFields(job);
+
   // Enrichment rewrites skills/type/level, so the derived fields must be
   // rebuilt before the job is stored or scored.
   for (const job of newJobs) refreshDerivedFields(job);
 
   /* ----------------------------- 5. PERSIST ----------------------------- */
-  await jobsRepo.saveJobs([...newJobs, ...updatedJobs]);
+  await jobsRepo.saveJobs([...newJobs, ...updatedJobs, ...enrichedBacklog]);
 
   for (const report of sourceReports) {
     await recordSourceHealth(report.sourceId, {
@@ -192,6 +242,7 @@ export async function runIngestion({
     new: newJobs.length,
     updated: updatedJobs.length,
     enriched: enrichedCount,
+    backfilled: enrichedBacklog.length,
     elapsedMs: runBudget.elapsedMs(),
   };
 

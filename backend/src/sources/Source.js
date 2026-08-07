@@ -56,6 +56,15 @@ export function defineSource(definition) {
     unavailableReason: definition.unavailableReason || null,
     /** Attribution text some boards require in their ToS (RemoteOK). */
     attribution: definition.attribution || null,
+    /**
+     * Optional per-source cap on the lookback window.
+     *
+     * Only set this on a source that filters by date SERVER-side and is polled
+     * every run — for those, a long window is pure redundant re-fetching. A
+     * source that is rotated or filtered client-side must inherit the global
+     * window, because there the window is its entire visibility budget.
+     */
+    maxSinceMs: definition.maxSinceMs ?? null,
     capabilities: {
       description: false,
       salary: false,

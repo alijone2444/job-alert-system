@@ -15,18 +15,28 @@ const log = createLogger('SettingsRepo');
 
 export const DEFAULT_INGEST_SETTINGS = {
   /**
-   * How far back each source looks.
+   * How far back each source looks, unless the adapter narrows it further.
    *
-   * THREE HOURS, not 24. With a 2-minute cron a 24-hour lookback re-fetches the
-   * same day of postings 720 times, and every one of those jobs then costs a
-   * Firestore read in the "have we seen this already?" check — which is what
-   * pushed the system past the free tier's 50,000 reads/day.
+   * BACK TO 24 HOURS, and the reason it was ever cut to 3 is worth recording.
    *
-   * This is a CATCH-UP window, not a filter on what users see: stored jobs stay
-   * in the pool for 30 days regardless. Three hours means the system can be
-   * completely down for three hours and still miss nothing.
+   * Cutting it looked free: with a 2-minute cron, re-fetching a full day of
+   * postings 720 times is obviously redundant, and every re-fetched job costs a
+   * Firestore read in the "have we seen this?" check. That reasoning holds for
+   * LinkedIn, which filters by date SERVER-side and is polled constantly.
+   *
+   * It is wrong for every other source. Greenhouse, Lever, Ashby, RemoteOK and
+   * We Work Remotely have no date parameter at all — they return a whole board
+   * and we filter locally. Worse, the ATS boards are polled by ROTATION, two or
+   * three company slugs per run. So a job only survives if it was posted inside
+   * the window that happened to be open when its slug came up. With a 3-hour
+   * window that is a lottery, and the pipeline collapsed from ~60 jobs a run to
+   * FIVE, with four of six sources returning zero.
+   *
+   * The window is a catch-up window for a date-sorted feed; for a rotated,
+   * unsorted board it is the entire visibility budget. Per-source now: see
+   * `maxSinceMs` on the LinkedIn adapter.
    */
-  freshnessWindowMs: Number(process.env.FRESHNESS_WINDOW_MS) || 3 * 60 * 60 * 1000,
+  freshnessWindowMs: Number(process.env.FRESHNESS_WINDOW_MS) || 24 * 60 * 60 * 1000,
   /** Per-source cap per run — keeps one chatty board from starving the others. */
   maxJobsPerSource: 60,
   /** LinkedIn detail requests per run (rate-limit budget). */

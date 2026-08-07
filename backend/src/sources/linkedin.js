@@ -311,6 +311,16 @@ export default defineSource({
   id: 'linkedin',
   label: 'LinkedIn',
   homepage: 'https://www.linkedin.com/jobs',
+  /**
+   * LinkedIn is the ONE source that filters by date server-side (`f_TPR`) and
+   * returns newest-first, and it is queried every single run. Six hours is
+   * therefore ample catch-up, and anything longer is just re-downloading — and
+   * re-read-charging — the same postings hundreds of times a day.
+   *
+   * Do NOT copy this onto the rotated boards: they have no date parameter, so
+   * for them the window is not redundancy, it is coverage.
+   */
+  maxSinceMs: 6 * 60 * 60 * 1000,
   capabilities: {
     description: true, // via the enrich pass
     salary: false, // LinkedIn guest pages almost never expose pay

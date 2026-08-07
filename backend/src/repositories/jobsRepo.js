@@ -123,6 +123,48 @@ export async function findByTags(tags, { sinceMs, limit = 200 }) {
   return snapshot.docs.map((doc) => doc.data());
 }
 
+/**
+ * Stored jobs from a source that never got their detail pass.
+ *
+ * WHY THIS EXISTS: enrichment is budgeted (a handful of detail requests per
+ * run) and used to be offered only to jobs that were new THAT run. Anything
+ * that missed the budget was written with `enriched:false`, an empty
+ * description and no skills — and was never looked at again, because on the
+ * next run it was no longer new. 35% of stored LinkedIn jobs were stranded
+ * that way, and a job with no detected skills cannot score highly, so those
+ * were permanently locked out of the notification threshold.
+ *
+ * Oldest-first, so the backlog drains in posting order instead of starving the
+ * same jobs forever.
+ */
+export async function findUnenriched(sourceId, { limit = 12, sinceMs } = {}) {
+  /**
+   * EQUALITY FILTERS ONLY — deliberately.
+   *
+   * Adding `.where('postedAt', '>=', cutoff)` makes this a composite query,
+   * which Firestore refuses without a composite index this project cannot
+   * create (the deploy service account has no Datastore Index Admin role).
+   * The first version did exactly that, the error was swallowed by a
+   * debug-level catch, and the backlog silently drained zero jobs forever.
+   *
+   * Equality-only queries are served by merging automatic single-field
+   * indexes, so this needs no setup. Age is filtered in memory below — over a
+   * page of 12, that costs nothing.
+   */
+  const snapshot = await collection()
+    .where('sourceId', '==', sourceId)
+    .where('enriched', '==', false)
+    .limit(limit * 2)
+    .get();
+
+  const cutoff = sinceMs ? Date.now() - sinceMs : null;
+
+  return snapshot.docs
+    .map((doc) => doc.data())
+    .filter((job) => !cutoff || new Date(job.postedAt).getTime() >= cutoff)
+    .slice(0, limit);
+}
+
 /** @returns {Promise<Object|null>} */
 export async function findByKey(jobKey) {
   const snapshot = await collection().doc(jobKey).get();

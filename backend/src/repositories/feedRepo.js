@@ -102,42 +102,49 @@ export async function writeEntries(userId, scored) {
 }
 
 /**
- * Read a page of a user's feed, highest score first.
+ * Read a page of a user's feed, NEWEST FIRST.
  *
- * ORDERS BY `score` ALONE, deliberately.
+ * Relevance decides what is in this collection; time decides the order. A job
+ * is only written here if it cleared the user's threshold, so a chronological
+ * order cannot surface anything irrelevant — it just stops a strong two-day-old
+ * posting from permanently outranking something that arrived a minute ago.
  *
- * The natural query is `orderBy(score desc).orderBy(postedAt desc)` — but two
- * order-by fields require a composite index, and creating one needs a
- * Datastore Index Admin role the deploy service account does not hold. Rather
- * than make the feed depend on a manual console step someone will forget, we
- * order on a single auto-indexed field and break score ties by recency
- * IN MEMORY over the returned page. Ranking is identical for the user, and the
- * system deploys with zero manual setup.
+ * ORDERS BY `postedAt` ALONE, deliberately. Two order-by fields require a
+ * composite index, and creating one needs a Datastore Index Admin role the
+ * deploy service account does not hold. So we order on a single auto-indexed
+ * field and break same-timestamp ties by score IN MEMORY over the returned
+ * page — identical result, zero manual setup.
  *
- * Pagination stays correct because Firestore implicitly appends `__name__` to
- * the sort, so `startAfter(score)` is stable across pages even with ties.
+ * `minScore` is likewise applied in memory: as an inequality on a field we do
+ * not sort by, it would demand that same unavailable composite index.
  */
 export async function listFeed(userId, { limit = 50, cursor = null, minScore = 0 } = {}) {
-  // An inequality on the same field we order by also needs no composite index.
-  let query =
-    minScore > 0
-      ? feedRef(userId).where('score', '>=', minScore).orderBy('score', 'desc')
-      : feedRef(userId).orderBy('score', 'desc');
+  let query = feedRef(userId).orderBy('postedAt', 'desc');
+  if (cursor?.postedAt) query = query.startAfter(cursor.postedAt);
 
-  if (cursor) query = query.startAfter(cursor.score);
+  // Over-fetch when filtering, so a page still comes back full.
+  const fetchLimit = minScore > 0 ? Math.min(200, limit * 3) : limit;
+  const snapshot = await query.limit(fetchLimit).get();
 
-  const snapshot = await query.limit(limit).get();
-  const items = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+  const items = snapshot.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter((item) => (item.score ?? 0) >= minScore)
+    .sort((a, b) => {
+      const byTime = new Date(b.postedAt) - new Date(a.postedAt);
+      return byTime !== 0 ? byTime : b.score - a.score;
+    })
+    .slice(0, limit);
 
-  items.sort((a, b) =>
-    b.score !== a.score ? b.score - a.score : new Date(b.postedAt) - new Date(a.postedAt)
-  );
-
-  const last = items[items.length - 1];
+  // The cursor follows the last document the QUERY returned, not the last one
+  // that survived filtering — otherwise a filtered-out tail would be re-read
+  // on the next page forever.
+  const lastScanned = snapshot.docs[snapshot.docs.length - 1];
   return {
     items,
     nextCursor:
-      items.length === limit && last ? { score: last.score, postedAt: last.postedAt } : null,
+      snapshot.size === fetchLimit && lastScanned
+        ? { postedAt: lastScanned.data().postedAt }
+        : null,
   };
 }
 

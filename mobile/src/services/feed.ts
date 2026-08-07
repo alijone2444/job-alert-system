@@ -53,7 +53,18 @@ function mapFeedItem(doc: FirebaseFirestoreTypes.QueryDocumentSnapshot): FeedIte
 }
 
 /**
- * Subscribe to the personalised feed, highest match first.
+ * Subscribe to the personalised feed, NEWEST FIRST.
+ *
+ * Relevance decides WHAT is in this collection — the backend only writes a job
+ * here if it cleared the user's match threshold. Time decides the ORDER.
+ *
+ * Those are two different jobs, and separating them is what makes a
+ * chronological feed safe: nothing irrelevant can appear just because it is
+ * recent, because irrelevant jobs were never written in the first place. The
+ * match percentage still rides on every card, so a strong result is still
+ * obvious — it is just no longer allowed to pin a two-day-old posting above
+ * something that landed a minute ago.
+ *
  * @returns unsubscribe
  */
 export function subscribeToFeed(
@@ -64,18 +75,16 @@ export function subscribeToFeed(
   logger.info('Feed', `Subscribing to feed for ${userId}`);
 
   return feedRef(userId)
-    .orderBy('score', 'desc')
+    .orderBy('postedAt', 'desc')
     .limit(FEED_PAGE_SIZE)
     .onSnapshot(
       (snapshot) => {
         const items = snapshot.docs.map(mapFeedItem);
-        // Equal scores are broken by recency — relevance first, freshness as
-        // the tie-break, matching the backend's ranking exactly.
-        items.sort((a, b) =>
-          b.score !== a.score
-            ? b.score - a.score
-            : new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime()
-        );
+        // Same-timestamp postings fall back to the stronger match.
+        items.sort((a, b) => {
+          const byTime = new Date(b.postedAt).getTime() - new Date(a.postedAt).getTime();
+          return byTime !== 0 ? byTime : b.score - a.score;
+        });
         logger.info('Feed', `Live update — ${items.length} matches`);
         onData(items);
       },

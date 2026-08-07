@@ -24,12 +24,19 @@ import { logger } from '../utils/logger';
 type Props = { onOpenPersonalize: () => void };
 
 /**
- * The personalised home feed.
+ * The personalised home feed — NEWEST FIRST.
  *
- * Everything here is already ranked by the backend, so the screen deliberately
- * has NO sort control — offering "sort by date" would let the user undo the
- * personalisation that is the point of the product. What it does offer is
- * narrowing: search, source, and a minimum-match slider.
+ * An earlier version ranked by match percentage and deliberately offered no
+ * sort control, on the argument that sorting by date would undo the
+ * personalisation. That conflated two separate things: relevance decides WHAT
+ * reaches this screen (the backend only writes a job above the user's
+ * threshold), and time decides the ORDER. Chronological order cannot surface
+ * anything irrelevant, because irrelevant jobs never arrive.
+ *
+ * It also fixes a real problem: a strong match from two days ago sat
+ * permanently at the top, so the feed looked frozen even while new jobs were
+ * flowing in underneath it. The percentage still rides on every card, and the
+ * "Min match" filter still narrows by relevance.
  */
 export function FeedScreen({ onOpenPersonalize }: Props) {
   const { userId } = useAppContext();
@@ -106,7 +113,9 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
     );
   }
 
-  const topScore = items[0]?.score ?? 0;
+  // The first card is now the NEWEST, not the strongest — so report the best
+  // match across the whole feed rather than whatever happens to be on top.
+  const bestScore = items.reduce((best, item) => Math.max(best, item.score), 0);
 
   return (
     <View style={styles.container}>
@@ -114,7 +123,7 @@ export function FeedScreen({ onOpenPersonalize }: Props) {
         title="For you"
         subtitle={
           items.length
-            ? `${filtered.length} of ${items.length} matches · best ${topScore}%`
+            ? `${filtered.length} of ${items.length} matches · newest first · best ${bestScore}%`
             : 'No matches yet'
         }
       />

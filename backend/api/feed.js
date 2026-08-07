@@ -21,16 +21,15 @@ import * as feedRepo from '../src/repositories/feedRepo.js';
 import * as usersRepo from '../src/repositories/usersRepo.js';
 import * as interactionsRepo from '../src/repositories/interactionsRepo.js';
 
+/** The feed is ordered by time, so the cursor is just a timestamp. */
 function parseCursor(raw) {
   if (!raw) return null;
-  const [score, postedAt] = String(raw).split(':');
-  const parsedScore = Number(score);
-  if (!Number.isFinite(parsedScore) || !postedAt) return null;
-  return { score: parsedScore, postedAt };
+  const postedAt = String(raw);
+  return Number.isNaN(new Date(postedAt).getTime()) ? null : { postedAt };
 }
 
 function encodeCursor(cursor) {
-  return cursor ? `${cursor.score}:${cursor.postedAt}` : null;
+  return cursor ? cursor.postedAt : null;
 }
 
 export default withApi({ methods: ['GET'] }, async (ctx) => {

@@ -70,6 +70,16 @@ export function buildCronReport({
       newJobs: ingestStats.new ?? 0,
       updatedJobs: ingestStats.updated ?? 0,
       enriched: ingestStats.enriched ?? 0,
+      /**
+       * Stranded jobs repaired this run.
+       *
+       * Surfaced deliberately: the backlog drainer failed silently once
+       * already (a missing composite index swallowed by a debug-level catch)
+       * and reported nothing for as long as it was broken. A repair job that
+       * is not measured is indistinguishable from a repair job with nothing
+       * to do.
+       */
+      backfilled: ingestStats.backfilled ?? 0,
     },
 
     personalization: {
